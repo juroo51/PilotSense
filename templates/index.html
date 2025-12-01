@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>PilotSense</title>
+
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: Inter, Arial, sans-serif;
+        background: #f5f7fa;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+      }
+
+      .card {
+        background: white;
+        padding: 40px;
+        border-radius: 14px;
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.08);
+        width: 380px;
+        text-align: center;
+      }
+
+      .logo {
+        height: 70px;
+        margin-bottom: 20px;
+        object-fit: contain;
+      }
+
+      h1 {
+        font-size: 26px;
+        margin-bottom: 10px;
+        color: #1d3557;
+      }
+
+      .subtitle {
+        font-size: 14px;
+        color: #6c757d;
+        margin-bottom: 25px;
+      }
+
+      select {
+        width: 100%;
+        padding: 12px;
+        border-radius: 8px;
+        border: 1px solid #d1d9e6;
+        font-size: 14px;
+        cursor: pointer;
+      }
+
+      select:focus {
+        outline: none;
+        border-color: #457b9d;
+        box-shadow: 0 0 0 3px rgba(69, 123, 157, 0.2);
+      }
+
+      footer {
+        margin-top: 25px;
+        font-size: 12px;
+        color: #9aa1ab;
+      }
+    </style>
+
+    <script>
+      function chooseFlight(sel) {
+        const value = sel.value;
+        if (value) {
+          window.location = "/flight/" + value;
+        }
+      }
+    </script>
+  </head>
+
+  <body>
+    <div class="card">
+      <img src="/static/logo_color.png" class="logo" alt="PilotSense Logo" />
+
+      <h1>PilotSense</h1>
+      <div class="subtitle">Select a flight to visualize</div>
+
+      <select onchange="chooseFlight(this)">
+        <option value="">-- Choose Flight --</option>
+        {% for f in flights %}
+          <option value="{{f}}">{{f}}</option>
+        {% endfor %}
+      </select>
+
+      <footer>ADS-B Flight Analysis</footer>
+    </div>
+  </body>
+</html>
