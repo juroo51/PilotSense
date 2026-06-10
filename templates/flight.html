@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
+<head>
     <meta charset="UTF-8" />
     <title>Flight {{flight_id}} • PilotSense</title>
 
@@ -17,8 +17,42 @@
         flex-direction: column;
       }
 
+      /* ----------------------------------------------------
+         FULLSCREEN LOADER OVERLAY
+      ---------------------------------------------------- */
+      #loader {
+        position: fixed;
+        inset: 0;
+        background: rgba(255, 255, 255, 0.92);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 99999;
+        transition: opacity 0.4s ease;
+      }
+
+      .spinner {
+        width: 48px;
+        height: 48px;
+        border: 4px solid #ced4da;
+        border-top-color: #1d71b8;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-bottom: 14px;
+      }
+
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+
+      #loader.fade-out {
+        opacity: 0;
+        pointer-events: none;
+      }
+
       /* Header */
-    .header {
+      .header {
         background: white;
         padding: 16px 24px;
         box-shadow: 0 2px 10px rgba(0,0,0,0.06);
@@ -27,18 +61,31 @@
         justify-content: space-between;
       }
 
-    .title {
+      .header-left {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .header-logo {
+        height: 32px;
+        width: auto;
+        object-fit: contain;
+      }
+
+      .title {
         font-size: 20px;
         font-weight: 600;
         color: #1d3557;
       }
 
-    .btn-group {
+      /* Buttons */
+      .btn-group {
         display: flex;
         gap: 10px;
       }
 
-    .btn {
+      .btn {
         padding: 8px 14px;
         border-radius: 8px;
         border: none;
@@ -48,49 +95,17 @@
         transition: 0.15s;
       }
 
-    .btn-back {
+      .btn-back {
         background: #e9ecef;
         color: #495057;
       }
+      .btn-back:hover { background: #dfe3e7; }
 
-    .btn-back:hover {
-        background: #dfe3e7;
-      }
-
-    .btn-graphs {
+      .btn-graphs {
         background: #457b9d;
         color: white;
       }
-
-    .btn-graphs:hover {
-        background: #3a6b8a;
-      }
-      .header {
-        background: white;
-        padding: 16px 24px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.06);
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        }
-
-    .header-left {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        }
-
-    .header-logo {
-        height: 32px;
-        width: auto;
-        object-fit: contain;
-        }
-
-        .title {
-        font-size: 20px;
-        font-weight: 600;
-        color: #1d3557;
-        }
+      .btn-graphs:hover { background: #3a6b8a; }
 
       /* Map */
       #map {
@@ -98,8 +113,8 @@
         width: 100%;
       }
 
-      /* Legend Panel */
-        #legend {
+      /* Floating Legend */
+      #legend {
         position: absolute;
         top: 90px;
         right: 20px;
@@ -112,108 +127,133 @@
         overflow-y: auto;
         width: 320px;
         font-size: 12px;
+        z-index: 9999;
         color: #333;
-        z-index: 9999; /* ✅ bring above map */
-        }
-
-
-      #legend b {
-        font-size: 14px;
-        color: #1d3557;
       }
-
-      @keyframes fadein {
-        from { opacity: 0; transform: translateY(5px); }
-        to { opacity: 1; transform: translateY(0); }
-      }
-
     </style>
-  </head>
+</head>
 
-  <body>
-    <!-- ✅ Modern Header -->
+<body>
+
+    <!-- 🔵 FULLSCREEN LOADING OVERLAY -->
+    <div id="loader">
+        <div class="spinner"></div>
+        <div style="font-size:14px; color:#1d3557;">Loading flight data…</div>
+    </div>
+
+    <!-- Header -->
     <div class="header">
-    <div class="header-left">
-        <img src="/static/logo_color.png" class="header-logo" alt="PilotSense Logo" />
-        <div class="title">Flight: {{flight_id}}</div>
+        <div class="header-left">
+            <img src="/static/logo_color.png" class="header-logo" alt="PilotSense Logo" />
+            <div class="title">Flight: {{flight_id}}</div>
+        </div>
+
+        <div class="btn-group">
+            <button class="btn btn-back" onclick="window.location='/'">Back</button>
+            <button class="btn btn-graphs" onclick="window.location='/flight/{{flight_id}}/graphs'">
+                Show Graphs
+            </button>
+        </div>
     </div>
 
-    <div class="btn-group">
-        <button class="btn btn-back" onclick="window.location='/'">Back</button>
-        <button class="btn btn-graphs" onclick="window.location='/flight/{{flight_id}}/graphs'">
-        Show Graphs
-        </button>
-    </div>
-    </div>
-
-
-    <!-- ✅ Map -->
     <div id="map"></div>
-
-    <!-- ✅ Floating Legend -->
     <div id="legend">Move mouse over trajectory…</div>
 
-    <!-- ✅ Logic -->
     <script>
       const flightId = "{{flight_id}}";
 
-        fetch(`/flight/${flightId}/trajectory`)
+      function hideLoader() {
+        const L = document.getElementById("loader");
+        L.classList.add("fade-out");
+        setTimeout(() => L.remove(), 600); // clean removal
+      }
+
+      fetch(`/flight/${flightId}/trajectory`)
         .then(res => res.json())
         .then(data => {
-            const points = data.trajectory.map(p => [p.lat, p.lon]);
+          const points = (data.trajectory || []).map(p => [p.lat, p.lon]);
 
-            const map = L.map("map").setView(points[0], 8);
-
-            L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          const map = L.map("map").setView(points.length ? points[0] : [48.15, 17.12], 8);
+          L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
             maxZoom: 18
-            }).addTo(map);
+          }).addTo(map);
 
-            const line = L.polyline(points, { color: "#1d71b8", weight: 3 }).addTo(map);
+          let line = null;
+          if (points.length) {
+            line = L.polyline(points, { color: "#1d71b8", weight: 3 }).addTo(map);
             map.fitBounds(line.getBounds());
+          } else {
+            document.getElementById("legend").innerHTML = "No GPS points found for this flight.";
+          }
 
-            // ✅ Create hover marker HERE in the SAME scope as the map
-            const hoverMarker = L.circleMarker([0, 0], {
+          // Hover marker
+          const hoverMarker = L.circleMarker([0, 0], {
             radius: 6,
             color: "#e63946",
             fillColor: "#e63946",
             fillOpacity: 0.9
-            }).addTo(map);
+          }).addTo(map);
 
-            hoverMarker.setStyle({ opacity: 0, fillOpacity: 0 });
+          hoverMarker.setStyle({ opacity: 0, fillOpacity: 0 });
 
-            // ✅ Mouse move handler AFTER hoverMarker is defined
-            map.on("mousemove", (e) => {
+          map.on("mousemove", (e) => {
+            if (!data.trajectory || !data.trajectory.length) {
+              return;
+            }
+
             let nearest = null;
             let minDist = Infinity;
 
             for (const p of data.trajectory) {
-                const dist = Math.hypot(e.latlng.lat - p.lat, e.latlng.lng - p.lon);
-                if (dist < minDist) {
+              const dist = Math.hypot(e.latlng.lat - p.lat, e.latlng.lng - p.lon);
+              if (dist < minDist) {
                 minDist = dist;
                 nearest = p;
-                }
+              }
             }
 
             if (nearest) {
-                hoverMarker.setLatLng([nearest.lat, nearest.lon]);
-                hoverMarker.setStyle({ opacity: 1, fillOpacity: 0.9 });
+              hoverMarker.setLatLng([nearest.lat, nearest.lon]);
+              hoverMarker.setStyle({ opacity: 1, fillOpacity: 0.9 });
 
-                let html = `<b>${flightId}</b><br>`;
-                html += `Time: ${nearest.timestamp}<br><hr>`;
-                for (const [key, value] of Object.entries(nearest)) {
-                if (key !== "lat" && key !== "lon" && key !== "timestamp") {
-                    html += `<span>${key}: ${value}</span><br>`;
-                }
-                }
-                document.getElementById("legend").innerHTML = html;
+              let html = `<b>${flightId}</b><br>`;
+              html += `Time: ${nearest.timestamp}<hr>`;
+
+              const displayKeys = [...new Set([
+                ...(data.fields || []),
+                ...((data.groups && data.groups.accel) || []),
+                ...((data.groups && data.groups.att) || []),
+                ...((data.groups && data.groups.adsb_movement) || []),
+              ])];
+
+              for (const key of displayKeys) {
+
+            const value = nearest[key];
+            if (value !== undefined)
+            {
+              const label = data.labels[key] || key;
+              html += `${label}: ${value}<br>`;
             }
-            });
 
-            // ✅ Hide marker when mouse leaves map
-            map.on("mouseout", () => {
+              // html += `${key}: ${value}<br>`;
+          }
+              document.getElementById("legend").innerHTML = html;
+            }
+          });
+
+          map.on("mouseout", () => {
             hoverMarker.setStyle({ opacity: 0, fillOpacity: 0 });
-            });
+          });
+
+          // 🎉 Hide loader AFTER everything is rendered
+          setTimeout(hideLoader, 300);
+        })
+        .catch(err => {
+          document.getElementById("loader").innerHTML =
+            "<b style='color:#e63946;'>Error loading data</b>";
+          console.error(err);
         });
     </script>
-  </body>
+
+</body>
 </html>
