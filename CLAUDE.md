@@ -20,13 +20,18 @@ uvicorn app:app --reload
 
 # Split a raw multi-flight NDJSON dump into per-flight files
 python tools/parse.py   # reads data/flights.json, writes data/parsed/<FLIGHT_ID>.json
+
+# Generate a synthetic flight that triggers safety events at every severity
+python tools/make_demo_flight.py   # writes data/parsed/DEMO-EVENTS.json
 ```
 
 There are no tests or linters configured.
 
 ## Architecture
 
-Everything server-side lives in [app.py](app.py); there are no other Python modules in the app itself.
+Server-side code is [app.py](app.py) (routes, data loading) and [analysis.py](analysis.py) (safety-event detection).
+
+**Safety analysis:** `analysis.py` runs detectors (`DETECTORS` list) over the merged flight DataFrame and emits events with severity 1–3 (Notice/Caution/Danger, colors in `SEVERITY_LEVELS`). Each detector groups consecutive exceedances into one event with a peak value and a human-readable `summary`. `GET /flight/{flight_id}/events` serves them; the map shows severity-colored markers plus a clickable events panel, the graphs page shades event time bands on every chart and lists explanations in a summary card. Thresholds are calibrated for light aircraft — tune them in the detector docstrings/code together.
 
 **Data flow:** raw NDJSON logs → `tools/parse.py` splits them by the `f` (flight/callsign) field into `data/parsed/<FLIGHT_ID>.json` → `app.py` reads those files on every request (no database, no caching). The flight list on the index page is simply the filenames in `data/parsed/`.
 

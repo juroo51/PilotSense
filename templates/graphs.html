@@ -76,6 +76,41 @@
       padding: 20px;
       color: #495057;
     }
+
+    /* Safety events summary */
+    #events-card {
+      display: none;
+      margin: 18px 18px 0;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+      padding: 14px 18px;
+      font-size: 13px;
+    }
+
+    #events-card h3 {
+      margin: 0 0 8px;
+      font-size: 15px;
+    }
+
+    .event-line {
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+      padding: 3px 0;
+      color: #495057;
+    }
+
+    .event-badge {
+      flex: none;
+      padding: 1px 8px;
+      border-radius: 10px;
+      color: white;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .event-when { color: #868e96; font-family: monospace; }
   </style>
 </head>
 <body>
@@ -85,6 +120,11 @@
       <button class="btn btn-back" onclick="window.location='/'">Back</button>
       <button class="btn btn-map" onclick="window.location='/flight/{{flight_id}}'">Show Map</button>
     </div>
+  </div>
+
+  <div id="events-card">
+    <h3>⚠ Safety events</h3>
+    <div id="events-lines"></div>
   </div>
 
   <div id="charts"></div>
@@ -99,9 +139,16 @@
       charts.appendChild(div);
     }
 
-    fetch(`/flight/{{flight_id}}/trajectory`)
-      .then(res => res.json())
-      .then(data => {
+    function hexToRgba(hex, alpha) {
+      const n = parseInt(hex.slice(1), 16);
+      return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+    }
+
+    Promise.all([
+      fetch(`/flight/{{flight_id}}/trajectory`).then(res => res.json()),
+      fetch(`/flight/{{flight_id}}/events`).then(res => res.json()),
+    ])
+      .then(([data, eventsData]) => {
         const trajectory = data.trajectory || [];
         if (trajectory.length === 0) {
           addTextCard("No trajectory data available for this flight.");
@@ -111,6 +158,37 @@
         const t = trajectory.map(p => p.timestamp);
         const labels = data.labels || {};
         const groups = data.groups || {};
+
+        // Severity-shaded time bands drawn on every chart, plus the summary card.
+        const events = (eventsData && eventsData.events) || [];
+        const levels = (eventsData && eventsData.levels) || {};
+
+        const eventShapes = events.map(e => ({
+          type: "rect",
+          xref: "x",
+          yref: "paper",
+          x0: e.start,
+          x1: e.end > e.start ? e.end : e.start,
+          y0: 0,
+          y1: 1,
+          fillcolor: hexToRgba(levels[e.severity].color, 0.18),
+          line: { width: 0 },
+        }));
+
+        if (events.length) {
+          const card = document.getElementById("events-card");
+          card.style.display = "block";
+          const lines = document.getElementById("events-lines");
+          for (const e of events) {
+            const div = document.createElement("div");
+            div.className = "event-line";
+            div.innerHTML =
+              `<span class="event-badge" style="background:${levels[e.severity].color}">${e.severity_name}</span>` +
+              `<span class="event-when">${e.start.slice(11, 19)}</span>` +
+              `<span>${e.summary}</span>`;
+            lines.appendChild(div);
+          }
+        }
 
         function addGroupedGraph(group, title) {
           const groupList = Array.isArray(group) ? group : [];
@@ -130,7 +208,8 @@
 
           Plotly.newPlot(div, traces, {
             title,
-            margin: { l: 50, r: 20, t: 48, b: 40 }
+            margin: { l: 50, r: 20, t: 48, b: 40 },
+            shapes: eventShapes
           }, { responsive: true });
         }
 
@@ -148,7 +227,8 @@
             name: labels[field] || field
           }], {
             title: labels[field] || field,
-            margin: { l: 50, r: 20, t: 48, b: 40 }
+            margin: { l: 50, r: 20, t: 48, b: 40 },
+            shapes: eventShapes
           }, { responsive: true });
         }
 

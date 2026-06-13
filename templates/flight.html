@@ -207,6 +207,77 @@
         margin-top: 3px;
         color: #495057;
       }
+
+      /* Safety events panel */
+      #events-panel {
+        display: none;
+        position: absolute;
+        bottom: 24px;
+        left: 20px;
+        z-index: 9999;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+        width: 380px;
+        max-height: 42vh;
+        font-size: 12px;
+        color: #333;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      #events-header {
+        padding: 10px 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        user-select: none;
+        border-bottom: 1px solid #e9ecef;
+      }
+
+      #events-title {
+        font-weight: 600;
+        color: #1d3557;
+        font-size: 13px;
+        flex: 1;
+      }
+
+      .sev-chip {
+        padding: 1px 8px;
+        border-radius: 10px;
+        color: white;
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      #events-toggle { color: #868e96; }
+
+      #events-list {
+        overflow-y: auto;
+        padding: 6px;
+        font-family: monospace;
+      }
+
+      .event-row {
+        display: flex;
+        gap: 8px;
+        padding: 6px 8px;
+        border-radius: 8px;
+        cursor: pointer;
+        align-items: flex-start;
+      }
+      .event-row:hover { background: #eef3f8; }
+
+      .event-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        margin-top: 2px;
+        flex: none;
+      }
+
+      .event-time { color: #868e96; }
     </style>
 </head>
 
@@ -234,6 +305,15 @@
     </div>
 
     <div id="map"></div>
+
+    <div id="events-panel">
+        <div id="events-header">
+            <span id="events-title">⚠ Safety events</span>
+            <span id="events-chips"></span>
+            <span id="events-toggle">▾</span>
+        </div>
+        <div id="events-list"></div>
+    </div>
 
     <div id="legend">
         <div id="legend-title">{{flight_id}}</div>
@@ -286,9 +366,11 @@
         return (Math.round(v * 10) / 10).toString();
       }
 
-      fetch(`/flight/${flightId}/trajectory`)
-        .then(res => res.json())
-        .then(data => {
+      Promise.all([
+        fetch(`/flight/${flightId}/trajectory`).then(res => res.json()),
+        fetch(`/flight/${flightId}/events`).then(res => res.json()),
+      ])
+        .then(([data, eventsData]) => {
           const trajectory = data.trajectory || [];
           const labels = data.labels || {};
           const points = trajectory.map(p => [p.lat, p.lon]);
@@ -450,6 +532,60 @@
           map.on("mouseout", () => {
             hoverMarker.setStyle({ opacity: 0, fillOpacity: 0 });
           });
+
+          // ---------- Safety events ----------
+          function renderEvents({ events = [], levels = {} }) {
+            if (!events.length) return;
+
+            const panel = document.getElementById("events-panel");
+            const list = document.getElementById("events-list");
+            panel.style.display = "flex";
+
+            // count chips per severity, highest first
+            const counts = {};
+            for (const e of events) counts[e.severity] = (counts[e.severity] || 0) + 1;
+            document.getElementById("events-chips").innerHTML =
+              Object.keys(counts).sort().reverse().map(sev =>
+                `<span class="sev-chip" style="background:${levels[sev].color}">` +
+                `${counts[sev]} ${levels[sev].name}</span>`
+              ).join(" ");
+
+            for (const e of events) {
+              const color = levels[e.severity].color;
+              const time = e.start.slice(11, 19);
+
+              const marker = L.circleMarker([e.lat, e.lon], {
+                radius: 5 + e.severity * 2,
+                fillColor: color,
+                color: "#fff",
+                weight: 2,
+                fillOpacity: 0.95,
+              }).addTo(map).bindPopup(
+                `<b style="color:${color}">${e.severity_name}</b> · ` +
+                `${e.type.replace(/_/g, " ")}<br>${e.summary}<br>` +
+                `<span style="color:#868e96">${time} UTC · ${e.duration_s} s</span>`
+              );
+
+              const row = document.createElement("div");
+              row.className = "event-row";
+              row.innerHTML =
+                `<span class="event-dot" style="background:${color}"></span>` +
+                `<span><span class="event-time">${time}</span> ${e.summary}</span>`;
+              row.addEventListener("click", () => {
+                map.flyTo([e.lat, e.lon], Math.max(map.getZoom(), 12));
+                marker.openPopup();
+              });
+              list.appendChild(row);
+            }
+
+            document.getElementById("events-header").addEventListener("click", () => {
+              const hidden = list.style.display === "none";
+              list.style.display = hidden ? "block" : "none";
+              document.getElementById("events-toggle").textContent = hidden ? "▾" : "▸";
+            });
+          }
+
+          renderEvents(eventsData || {});
 
           // 🎉 Hide loader AFTER everything is rendered
           setTimeout(hideLoader, 300);

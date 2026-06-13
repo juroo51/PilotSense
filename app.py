@@ -10,6 +10,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import pandas as pd
 
+from analysis import SEVERITY_LEVELS, analyze_flight
+
 PARSED_DIR = Path("data/parsed")
 
 # Max accepted upload size per request (bytes)
@@ -378,6 +380,15 @@ async def flight_trajectory(flight_id: str):
             "adsb_movement": GROUP_ADSB_MOVEMENT
         }
     }
+
+
+@app.get("/flight/{flight_id}/events")
+async def flight_events(flight_id: str):
+    """Safety events detected in the flight (see analysis.py)."""
+    df = load_flight_data(flight_id)
+    if df.empty:
+        return {"events": [], "levels": SEVERITY_LEVELS}
+    return analyze_flight(df.sort_values("timestamp"))
 
 
 @app.get("/", response_class=HTMLResponse)
