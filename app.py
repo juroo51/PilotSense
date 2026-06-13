@@ -1,14 +1,33 @@
 import json
+import os
 import re
+import secrets
 from datetime import datetime, timezone
 from pathlib import Path
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import pandas as pd
 
 PARSED_DIR = Path("data/parsed")
+
+# Max accepted upload size per request (bytes)
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+
+
+def _load_device_keys():
+    """Per-device API keys from PILOTSENSE_DEVICE_KEYS="dev1:key1,dev2:key2"."""
+    keys = {}
+    for pair in os.environ.get("PILOTSENSE_DEVICE_KEYS", "").split(","):
+        if ":" in pair:
+            device_id, key = pair.split(":", 1)
+            if device_id.strip() and key.strip():
+                keys[device_id.strip()] = key.strip()
+    return keys
+
+
+DEVICE_KEYS = _load_device_keys()
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -48,8 +67,36 @@ def _parse_gps_timestamp(gps_date, gps_time):
         return pd.NaT
 
 
+def _parse_log_line(line: str):
+    """Parse one PilotSense NDJSON log line, tolerating unquoted Adsb_HexId.
+
+    Returns (record_dict, normalized_line) or (None, None) if unparseable.
+    """
+    try:
+        record = json.loads(line)
+    except json.JSONDecodeError:
+        # Some ADS-B log lines emit Adsb_HexId as an unquoted hex literal
+        # (e.g. "Adsb_HexId": 505CE5), which isn't valid JSON.
+        fixed = re.sub(
+            r'("Adsb_HexId":\s*)([0-9A-Fa-f]+)\b',
+            r'\1"\2"',
+            line,
+        )
+        try:
+            record = json.loads(fixed)
+        except json.JSONDecodeError:
+            return None, None
+        line = fixed
+    if not isinstance(record, dict):
+        return None, None
+    return record, line
+
+
 def load_flight_data(flight_id: str) -> pd.DataFrame:
     file_path = PARSED_DIR / f"{flight_id}.json"
+    if not file_path.is_file():
+        return pd.DataFrame()
+
     rows = []
     last_adsb = {}
 
@@ -87,21 +134,8 @@ def load_flight_data(flight_id: str) -> pd.DataFrame:
             if not line:
                 continue
 
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                # Some ADS-B log lines emit Adsb_HexId as an unquoted hex literal
-                # (e.g. "Adsb_HexId": 505CE5), which isn't valid JSON.
-                fixed = re.sub(
-                    r'("Adsb_HexId":\s*)([0-9A-Fa-f]+)\b',
-                    r'\1"\2"',
-                    line,
-                )
-                try:
-                    record = json.loads(fixed)
-                except json.JSONDecodeError:
-                    continue
-            if not isinstance(record, dict):
+            record, _ = _parse_log_line(line)
+            if record is None:
                 continue
 
             update_adsb_state(record)
@@ -183,11 +217,84 @@ GROUP_ADSB_POSITION = ["latitude", "longitude"]
 GROUP_ADSB_MOVEMENT = ["ground_speed", "track", "heading"]
 
 
+# ------------------ DATA INGESTION ------------------
+
+def _sanitize_flight_id(flight_id: str) -> str:
+    return "".join(c for c in flight_id if c.isalnum() or c in ("_", "-", "."))
+
+
+def _authenticate_device(device_id: str, api_key: str):
+    if not DEVICE_KEYS:
+        raise HTTPException(
+            status_code=503,
+            detail="Ingestion disabled: PILOTSENSE_DEVICE_KEYS is not configured",
+        )
+    expected = DEVICE_KEYS.get(device_id)
+    if expected is None or not secrets.compare_digest(expected, api_key):
+        raise HTTPException(status_code=401, detail="Invalid device credentials")
+
+
+@app.post("/api/flights/{flight_id}/data")
+async def ingest_flight_data(
+    flight_id: str,
+    request: Request,
+    x_device_id: str = Header(...),
+    x_api_key: str = Header(...),
+):
+    """Accept a batch of NDJSON log lines from an authorized device.
+
+    Valid lines are appended to the flight's file; the response reports
+    how many lines were accepted vs rejected so devices can detect problems.
+    """
+    _authenticate_device(x_device_id, x_api_key)
+
+    safe_id = _sanitize_flight_id(flight_id)
+    if not safe_id or safe_id != flight_id:
+        raise HTTPException(status_code=400, detail="Invalid flight id")
+
+    body = await request.body()
+    if len(body) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Upload too large")
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty body")
+
+    try:
+        text = body.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="Body must be UTF-8 NDJSON")
+
+    accepted_lines = []
+    rejected = 0
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        record, normalized = _parse_log_line(line)
+        if record is None:
+            rejected += 1
+            continue
+        accepted_lines.append(normalized)
+
+    if accepted_lines:
+        PARSED_DIR.mkdir(parents=True, exist_ok=True)
+        with open(PARSED_DIR / f"{safe_id}.json", "a") as f:
+            f.write("\n".join(accepted_lines) + "\n")
+
+    return {
+        "flight_id": safe_id,
+        "device_id": x_device_id,
+        "accepted": len(accepted_lines),
+        "rejected": rejected,
+    }
+
+
 # ------------------ API ENDPOINTS ------------------
 
 @app.get("/flight/{flight_id}/trajectory")
 async def flight_trajectory(flight_id: str):
-    df = load_flight_data(flight_id).sort_values("timestamp")
+    df = load_flight_data(flight_id)
+    if not df.empty:
+        df = df.sort_values("timestamp")
 
     if df.empty:
         return {

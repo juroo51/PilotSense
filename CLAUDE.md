@@ -38,6 +38,8 @@ Everything server-side lives in [app.py](app.py); there are no other Python modu
 - GPS timestamps use a two-digit-year format `DD-MM-YY HH:MM:SS` (UTC).
 - Lines with `Gps_data: "no_data"` carry lat/lon `0.0` and are skipped.
 
+**Data ingestion:** `POST /api/flights/{flight_id}/data` accepts a batch of raw NDJSON log lines from authorized devices and appends them to `data/parsed/<flight_id>.json`. Auth is per-device via `X-Device-Id` + `X-Api-Key` headers, checked against the `PILOTSENSE_DEVICE_KEYS` env var (`"device1:key1,device2:key2"`); the endpoint returns 503 when no keys are configured. Lines are validated with the same lenient parser (`_parse_log_line`) the loader uses; the response reports accepted/rejected counts.
+
 **Single JSON API:** `GET /flight/{flight_id}/trajectory` returns `{trajectory, fields, labels, groups}`. Both frontends (map and graphs) consume this same endpoint:
 - `trajectory` is a list of points (lat/lon/timestamp plus every value field, floats rounded to 2 decimals, NaN/inf → null).
 - `labels` comes from the `FRIENDLY_NAMES` dict in app.py — add an entry there when introducing a new field so the UI shows a human-readable name.
