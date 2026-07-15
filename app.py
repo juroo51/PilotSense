@@ -120,8 +120,15 @@ def load_flight_data(flight_id: str) -> pd.DataFrame:
             updates["adsb_msg_type"] = record["Adsb_msg"]
         if "Adsb_gnd_speed" in record:
             updates["ground_speed"] = record["Adsb_gnd_speed"]
+        # ADS-B reports indicated (IAS) and true (TAS) airspeed as separate
+        # fields. Indicated airspeed is the pilot-facing "air speed"; keep
+        # true airspeed alongside it. (Older logs used a single Adsb_air_speed.)
         if "Adsb_air_speed" in record:
             updates["air_speed"] = record["Adsb_air_speed"]
+        if "Adsb_indic_air_speed" in record:
+            updates["air_speed"] = record["Adsb_indic_air_speed"]
+        if "Adsb_true_air_speed" in record:
+            updates["true_air_speed"] = record["Adsb_true_air_speed"]
         if "Adsb_callsign" in record:
             callsign = str(record["Adsb_callsign"]).strip()
             if callsign:
@@ -157,6 +164,7 @@ def load_flight_data(flight_id: str) -> pd.DataFrame:
                     "latitude": lat,
                     "longitude": lon,
                     "gps_speed": record.get("Gps_speed"),
+                    "gps_altitude": record.get("Gps_alt"),
                     "track": record.get("Gps_tr"),
                     "gps_status": record.get("Gps_data"),
                     "gps_lat_raw": record.get("Gps_lat"),
@@ -194,10 +202,12 @@ FRIENDLY_NAMES = {
     "heading": "Heading (°)",
     "track": "Track Angle (°)",
     "gps_speed": "GPS Speed",
+    "gps_altitude": "GPS Altitude (m)",
     "gps_status": "GPS Status",
     "gps_lat_raw": "Raw GPS Latitude (DDMM.MMMM)",
     "gps_lon_raw": "Raw GPS Longitude (DDDMM.MMMM)",
-    "air_speed": "Air Speed",
+    "air_speed": "Indicated Air Speed (kt)",
+    "true_air_speed": "True Air Speed (kt)",
     "aircraft_status": "Aircraft Status",
     "altitude_unit": "Altitude Unit",
     "adsb_msg_type": "ADS-B Message Type",
