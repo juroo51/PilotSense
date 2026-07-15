@@ -1,0 +1,5 @@
+{
+  // Inject variables from .env (FR24_API_TOKEN, etc.) into integrated terminals.
+  "python.terminal.useEnvFile": true,
+  "python.envFile": "${workspaceFolder}/.env"
+}

@@ -5,12 +5,13 @@ import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import pandas as pd
 
 from analysis import SEVERITY_LEVELS, analyze_flight
+import fr24_client
 
 PARSED_DIR = Path("data/parsed")
 
@@ -389,6 +390,45 @@ async def flight_events(flight_id: str):
     if df.empty:
         return {"events": [], "levels": SEVERITY_LEVELS}
     return analyze_flight(df.sort_values("timestamp"))
+
+
+@app.get("/flight/{flight_id}/fr24")
+async def flight_fr24(flight_id: str, fr24_id: str | None = None):
+    """Fetch the same flight from FlightRadar (matched by ICAO hex + date).
+
+    Returns a normalized trajectory (same field names as our own) so the map
+    can overlay both tracks and diff shared fields. Errors are returned as
+    JSON with the appropriate status so the UI can show them inline.
+    """
+    df = load_flight_data(flight_id)
+    if df.empty:
+        return JSONResponse(status_code=404, content={"error": "Flight has no data."})
+
+    df = df.sort_values("timestamp")
+
+    # ICAO hex: most frequent non-null value across the flight.
+    hex_id = ""
+    if "hex_id" in df.columns:
+        hexes = df["hex_id"].dropna()
+        if not hexes.empty:
+            hex_id = str(hexes.mode().iloc[0])
+
+    # Flight date: first valid GPS timestamp (UTC).
+    ts = df["timestamp"].dropna()
+    if ts.empty:
+        return JSONResponse(
+            status_code=422, content={"error": "Flight has no usable timestamps."}
+        )
+    date_utc = ts.iloc[0].to_pydatetime()
+
+    try:
+        result = fr24_client.fetch_flight_track(hex_id, date_utc, fr24_id=fr24_id)
+    except fr24_client.Fr24Error as exc:
+        return JSONResponse(status_code=exc.status_code, content={"error": exc.message})
+
+    result["labels"] = FRIENDLY_NAMES
+    result["matched_on"] = {"hex": hex_id, "date": date_utc.date().isoformat()}
+    return result
 
 
 @app.get("/", response_class=HTMLResponse)

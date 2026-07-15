@@ -107,27 +107,51 @@
       }
       .btn-graphs:hover { background: #3a6b8a; }
 
+      .btn-fr24 {
+        background: linear-gradient(135deg, #ff8a3d, #f26419);
+        color: white;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .btn-fr24 svg { width: 16px; height: 16px; }
+      .btn-fr24:hover { background: linear-gradient(135deg, #ff7a26, #e05a14); }
+      .btn-fr24:disabled { opacity: 0.65; cursor: progress; }
+      .btn-fr24.active { background: linear-gradient(135deg, #5b6b7d, #45617a); }
+
       /* Map */
       #map {
         flex: 1;
         width: 100%;
       }
 
-      /* Floating Legend */
-      #legend {
+      /* Right-side sidebar: flight data + safety events stacked together */
+      #sidebar {
         position: absolute;
         top: 90px;
         right: 20px;
+        width: 340px;
+        max-width: calc(100vw - 40px);
+        max-height: calc(100vh - 130px);
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        z-index: 9999;
+      }
+
+      /* Floating Legend — keeps its natural size; never shrinks when the
+         events panel below it expands. */
+      #legend {
         background: white;
         padding: 14px 12px;
-        border-radius: 12px;
+        border-radius: 14px;
         box-shadow: 0 6px 18px rgba(0,0,0,0.1);
+        border: 1px solid rgba(29, 53, 87, 0.06);
         font-family: monospace;
-        max-height: 75vh;
+        flex: 0 0 auto;
+        max-height: 60vh;
         overflow-y: auto;
-        width: 320px;
         font-size: 12px;
-        z-index: 9999;
         color: #333;
       }
 
@@ -208,76 +232,427 @@
         color: #495057;
       }
 
-      /* Safety events panel */
+      /* ----------------------------------------------------
+         SAFETY EVENTS PANEL
+      ---------------------------------------------------- */
       #events-panel {
         display: none;
-        position: absolute;
-        bottom: 24px;
-        left: 20px;
-        z-index: 9999;
         background: white;
-        border-radius: 12px;
-        box-shadow: 0 6px 18px rgba(0,0,0,0.12);
-        width: 380px;
-        max-height: 42vh;
+        border-radius: 14px;
+        box-shadow: 0 6px 18px rgba(0,0,0,0.1);
+        border: 1px solid rgba(29, 53, 87, 0.06);
         font-size: 12px;
         color: #333;
+        flex: 0 1 auto;
+        min-height: 0;
         flex-direction: column;
         overflow: hidden;
       }
 
       #events-header {
-        padding: 10px 12px;
+        padding: 12px 14px;
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 9px;
         cursor: pointer;
         user-select: none;
-        border-bottom: 1px solid #e9ecef;
+        background: linear-gradient(135deg, #fff5f3, #ffffff 70%);
+        border-bottom: 1px solid #f0e3e0;
       }
 
+      #events-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 8px;
+        background: rgba(215, 25, 28, 0.1);
+        color: #d7191c;
+        flex: none;
+      }
+      #events-icon svg { width: 16px; height: 16px; display: block; }
+
       #events-title {
-        font-weight: 600;
+        font-weight: 700;
         color: #1d3557;
         font-size: 13px;
+        font-family: Inter, Arial, sans-serif;
         flex: 1;
+        letter-spacing: 0.2px;
+      }
+
+      #events-chips {
+        display: flex;
+        gap: 5px;
       }
 
       .sev-chip {
-        padding: 1px 8px;
-        border-radius: 10px;
-        color: white;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 8px;
+        border-radius: 999px;
         font-size: 11px;
-        font-weight: 600;
+        font-weight: 700;
+        font-family: Inter, Arial, sans-serif;
+      }
+      .sev-chip::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
       }
 
-      #events-toggle { color: #868e96; }
+      #events-toggle {
+        color: #adb5bd;
+        display: flex;
+        align-items: center;
+        transition: transform 0.2s;
+      }
+      #events-toggle svg { width: 18px; height: 18px; display: block; }
+      #events-panel.collapsed #events-toggle { transform: rotate(-90deg); }
 
       #events-list {
         overflow-y: auto;
-        padding: 6px;
-        font-family: monospace;
+        padding: 8px;
+        font-family: Inter, Arial, sans-serif;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
       }
 
       .event-row {
         display: flex;
-        gap: 8px;
-        padding: 6px 8px;
-        border-radius: 8px;
+        gap: 10px;
+        padding: 9px 10px;
+        border-radius: 10px;
         cursor: pointer;
         align-items: flex-start;
+        border-left: 3px solid transparent;
+        transition: background 0.12s, border-color 0.12s, transform 0.1s;
       }
-      .event-row:hover { background: #eef3f8; }
+      .event-row:hover {
+        background: #f4f8fc;
+        transform: translateX(2px);
+      }
 
       .event-dot {
-        width: 10px;
-        height: 10px;
+        width: 11px;
+        height: 11px;
         border-radius: 50%;
-        margin-top: 2px;
+        margin-top: 3px;
         flex: none;
+        box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.04);
       }
 
-      .event-time { color: #868e96; }
+      .event-body { flex: 1; min-width: 0; }
+
+      .event-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 2px;
+      }
+
+      .event-time {
+        color: #6b7785;
+        font-family: monospace;
+        font-size: 11px;
+      }
+
+      .event-sev {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        padding: 1px 6px;
+        border-radius: 5px;
+      }
+
+      .event-summary {
+        color: #2b3b4e;
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      /* ----------------------------------------------------
+         GENERIC SIDEBAR CARDS (data quality + FR24 compare)
+      ---------------------------------------------------- */
+      #dq-panel, #fr24-panel {
+        background: white;
+        border-radius: 14px;
+        box-shadow: 0 6px 18px rgba(0,0,0,0.1);
+        border: 1px solid rgba(29, 53, 87, 0.06);
+        font-family: Inter, Arial, sans-serif;
+        font-size: 12px;
+        color: #333;
+        flex: 0 0 auto;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      #fr24-panel { display: none; }
+
+      .card-header {
+        padding: 12px 14px;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        cursor: pointer;
+        user-select: none;
+        border-bottom: 1px solid #eef1f5;
+      }
+      .card-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 8px;
+        flex: none;
+      }
+      .card-icon svg { width: 16px; height: 16px; display: block; }
+      .dq-icon { background: rgba(29, 113, 184, 0.1); color: #1d71b8; }
+      .fr24-icon { background: rgba(242, 100, 25, 0.12); color: #f26419; }
+
+      .card-title {
+        font-weight: 700;
+        color: #1d3557;
+        font-size: 13px;
+        flex: 1;
+        letter-spacing: 0.2px;
+      }
+      .card-toggle {
+        color: #adb5bd;
+        display: flex;
+        align-items: center;
+        transition: transform 0.2s;
+      }
+      .card-toggle svg { width: 18px; height: 18px; display: block; }
+      .collapsed .card-toggle { transform: rotate(-90deg); }
+
+      #dq-body, #fr24-body {
+        padding: 10px 12px 12px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 9px;
+      }
+      .collapsed #dq-body, .collapsed #fr24-body { display: none; }
+
+      /* Field block (one metric being verified) */
+      .dq-field { display: flex; flex-direction: column; gap: 6px; }
+      .dq-field + .dq-field {
+        border-top: 1px solid #eef1f5;
+        padding-top: 9px;
+      }
+      .dq-field-name {
+        font-weight: 700;
+        color: #1d3557;
+        font-size: 12px;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+
+      .dq-verdict {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        padding: 2px 7px;
+        border-radius: 999px;
+      }
+      .v-good { color: #1a8a3c; background: rgba(26, 138, 60, 0.12); }
+      .v-warn { color: #b06a00; background: rgba(244, 180, 0, 0.16); }
+      .v-bad  { color: #c0282b; background: rgba(215, 25, 28, 0.12); }
+
+      .dq-bar {
+        height: 6px;
+        border-radius: 999px;
+        background: #eef1f5;
+        overflow: hidden;
+      }
+      .dq-bar > span {
+        display: block;
+        height: 100%;
+        border-radius: 999px;
+      }
+
+      .dq-rows { display: flex; flex-direction: column; gap: 3px; }
+      .dq-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        font-family: monospace;
+        font-size: 11.5px;
+      }
+      .dq-row .k { color: #6b7785; }
+      .dq-row .v { color: #1d3557; font-weight: 600; white-space: nowrap; }
+      .dq-row .v.flag { color: #c0282b; }
+
+      .dq-note {
+        font-size: 11px;
+        color: #6b7785;
+        line-height: 1.4;
+        background: #f6f8fb;
+        border-radius: 8px;
+        padding: 7px 9px;
+      }
+      .dq-note b { color: #1d3557; }
+
+      .fr24-status {
+        font-size: 12px;
+        line-height: 1.45;
+        color: #45617a;
+      }
+      .fr24-status.error { color: #c0282b; }
+      .fr24-legend {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+        color: #6b7785;
+      }
+      .fr24-swatch {
+        width: 22px;
+        height: 0;
+        border-top: 3px dashed #f26419;
+      }
+      .fr24-swatch.ours { border-top: 3px solid #1d71b8; }
+
+      /* ----------------------------------------------------
+         PLAYBACK BAR
+      ---------------------------------------------------- */
+      #playback {
+        display: none;
+        position: absolute;
+        bottom: 26px;
+        left: 50%;
+        transform: translateX(-50%) translateY(8px);
+        opacity: 0;
+        z-index: 9999;
+        background: rgba(255, 255, 255, 0.78);
+        backdrop-filter: blur(16px) saturate(140%);
+        -webkit-backdrop-filter: blur(16px) saturate(140%);
+        border: 1px solid rgba(255, 255, 255, 0.6);
+        border-radius: 18px;
+        box-shadow: 0 12px 32px rgba(29, 53, 87, 0.18), 0 2px 6px rgba(29, 53, 87, 0.08);
+        padding: 12px 18px;
+        align-items: center;
+        gap: 14px;
+        width: 560px;
+        max-width: calc(100vw - 40px);
+        box-sizing: border-box;
+        font-family: Inter, Arial, sans-serif;
+        transition: opacity 0.35s ease, transform 0.35s ease;
+      }
+      #playback.ready {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+
+      .pb-btn {
+        border: none;
+        background: transparent;
+        color: #45617a;
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.15s, color 0.15s, transform 0.1s;
+        flex: none;
+        padding: 0;
+      }
+      .pb-btn svg { width: 18px; height: 18px; display: block; }
+      .pb-btn:hover { background: rgba(29, 113, 184, 0.1); color: #1d71b8; }
+      .pb-btn:active { transform: scale(0.92); }
+
+      .pb-btn.primary {
+        background: linear-gradient(135deg, #2a8fd8, #1d71b8);
+        color: white;
+        width: 46px;
+        height: 46px;
+        box-shadow: 0 4px 12px rgba(29, 113, 184, 0.4);
+      }
+      .pb-btn.primary svg { width: 20px; height: 20px; }
+      .pb-btn.primary:hover {
+        background: linear-gradient(135deg, #319bea, #1a64a3);
+        color: white;
+        transform: scale(1.05);
+      }
+      .pb-btn.primary:active { transform: scale(0.96); }
+
+      /* Speed control */
+      .pb-speed-group {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        background: rgba(29, 53, 87, 0.06);
+        border-radius: 999px;
+        padding: 3px;
+        flex: none;
+      }
+      .pb-speed-group .pb-btn { width: 26px; height: 26px; }
+      .pb-speed-group .pb-btn svg { width: 13px; height: 13px; }
+
+      #pb-speed {
+        font-size: 12px;
+        font-weight: 700;
+        color: #1d3557;
+        min-width: 40px;
+        text-align: center;
+        letter-spacing: 0.3px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* Scrubber */
+      #pb-scrubber {
+        -webkit-appearance: none;
+        appearance: none;
+        flex: 1;
+        height: 6px;
+        border-radius: 999px;
+        background: linear-gradient(to right, #1d71b8 0%, #d7dee6 0%);
+        cursor: pointer;
+        outline: none;
+      }
+      #pb-scrubber::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: #fff;
+        border: 3px solid #1d71b8;
+        box-shadow: 0 2px 6px rgba(29, 53, 87, 0.3);
+        transition: transform 0.12s;
+      }
+      #pb-scrubber::-webkit-slider-thumb:hover { transform: scale(1.18); }
+      #pb-scrubber::-moz-range-thumb {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: #fff;
+        border: 3px solid #1d71b8;
+        box-shadow: 0 2px 6px rgba(29, 53, 87, 0.3);
+      }
+
+      #pb-time {
+        font-size: 12px;
+        font-weight: 600;
+        color: #45617a;
+        white-space: nowrap;
+        flex: none;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.2px;
+      }
+      #pb-time .pb-total { color: #9aa9b8; font-weight: 500; }
     </style>
 </head>
 
@@ -298,6 +673,10 @@
 
         <div class="btn-group">
             <button class="btn btn-back" onclick="window.location='/'">Back</button>
+            <button class="btn btn-fr24" id="btn-fr24" title="Load the same flight from FlightRadar and compare">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5L21 16z"/></svg>
+                <span id="btn-fr24-label">Compare with FlightRadar</span>
+            </button>
             <button class="btn btn-graphs" onclick="window.location='/flight/{{flight_id}}/graphs'">
                 Show Graphs
             </button>
@@ -306,26 +685,79 @@
 
     <div id="map"></div>
 
-    <div id="events-panel">
-        <div id="events-header">
-            <span id="events-title">⚠ Safety events</span>
-            <span id="events-chips"></span>
-            <span id="events-toggle">▾</span>
+    <div id="playback">
+        <button class="pb-btn" id="pb-rewind" title="Restart">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 6a1 1 0 0 1 2 0v4.5l8.4-5a1 1 0 0 1 1.5.9v9.2a1 1 0 0 1-1.5.9L9 12.5V17a1 1 0 0 1-2 0V6z"/></svg>
+        </button>
+        <button class="pb-btn primary" id="pb-play" title="Play / Pause">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v13.72a1 1 0 0 0 1.54.84l10.79-6.86a1 1 0 0 0 0-1.68L9.54 4.3A1 1 0 0 0 8 5.14z"/></svg>
+        </button>
+        <div class="pb-speed-group">
+            <button class="pb-btn" id="pb-slower" title="Slow down">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 19V5l-8 7 8 7zm6 0V5l-8 7 8 7z"/></svg>
+            </button>
+            <span id="pb-speed">1×</span>
+            <button class="pb-btn" id="pb-faster" title="Speed up">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M11 5v14l8-7-8-7zm-6 0v14l8-7-8-7z"/></svg>
+            </button>
         </div>
-        <div id="events-list"></div>
+        <input type="range" id="pb-scrubber" min="0" max="1000" value="0" />
+        <span id="pb-time">--:--:-- <span class="pb-total">/ --:--:--</span></span>
     </div>
 
-    <div id="legend">
-        <div id="legend-title">{{flight_id}}</div>
-        <div id="legend-hint">Hover the track for values.<br>Click a ◌ metric to color the track by it.</div>
-        <div id="legend-rows">Loading…</div>
-        <div id="colorbar">
-            <div id="colorbar-name"></div>
-            <div id="colorbar-gradient"></div>
-            <div id="colorbar-labels">
-                <span id="colorbar-min"></span>
-                <span id="colorbar-max"></span>
+    <div id="sidebar">
+        <div id="legend">
+            <div id="legend-title">{{flight_id}}</div>
+            <div id="legend-hint">Hover the track for values.<br>Click a ◌ metric to color the track by it.</div>
+            <div id="legend-rows">Loading…</div>
+            <div id="colorbar">
+                <div id="colorbar-name"></div>
+                <div id="colorbar-gradient"></div>
+                <div id="colorbar-labels">
+                    <span id="colorbar-min"></span>
+                    <span id="colorbar-max"></span>
+                </div>
             </div>
+        </div>
+
+        <div id="dq-panel">
+            <div class="card-header" id="dq-header">
+                <span class="card-icon dq-icon">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h2v7H3v-7zm4-6h2v13H7V7zm4 3h2v10h-2V10zm4-7h2v17h-2V3zm4 9h2v8h-2v-8z"/></svg>
+                </span>
+                <span class="card-title">ADS-B data quality</span>
+                <span class="card-toggle">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 15.5 5.5 9 7 7.5l5 5 5-5L18.5 9 12 15.5z"/></svg>
+                </span>
+            </div>
+            <div id="dq-body"></div>
+        </div>
+
+        <div id="fr24-panel">
+            <div class="card-header" id="fr24-header">
+                <span class="card-icon fr24-icon">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5L21 16z"/></svg>
+                </span>
+                <span class="card-title">FlightRadar comparison</span>
+                <span class="card-toggle">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 15.5 5.5 9 7 7.5l5 5 5-5L18.5 9 12 15.5z"/></svg>
+                </span>
+            </div>
+            <div id="fr24-body"></div>
+        </div>
+
+        <div id="events-panel">
+            <div id="events-header">
+                <span id="events-icon">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 1 21h22L12 2zm0 5.8 7.5 12.95h-15L12 7.8zM11 10v5h2v-5h-2zm0 6v2h2v-2h-2z"/></svg>
+                </span>
+                <span id="events-title">Safety events</span>
+                <span id="events-chips"></span>
+                <span id="events-toggle">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 15.5 5.5 9 7 7.5l5 5 5-5L18.5 9 12 15.5z"/></svg>
+                </span>
+            </div>
+            <div id="events-list"></div>
         </div>
     </div>
 
@@ -508,21 +940,32 @@
 
           hoverMarker.setStyle({ opacity: 0, fillOpacity: 0 });
 
+          // Set by setupPlayback so hovering the map can drive the playhead.
+          let playbackSeekToIndex = null;
+
           map.on("mousemove", (e) => {
             if (!trajectory.length) return;
 
-            let nearest = null;
+            let nearestIdx = -1;
             let minDist = Infinity;
 
-            for (const p of trajectory) {
+            for (let i = 0; i < trajectory.length; i++) {
+              const p = trajectory[i];
               const dist = Math.hypot(e.latlng.lat - p.lat, e.latlng.lng - p.lon);
               if (dist < minDist) {
                 minDist = dist;
-                nearest = p;
+                nearestIdx = i;
               }
             }
 
-            if (nearest) {
+            if (nearestIdx < 0) return;
+
+            // When playback is available, snap the playhead (and its blue dot
+            // + scrubber) to the hovered point so everything stays in sync.
+            if (playbackSeekToIndex) {
+              playbackSeekToIndex(nearestIdx);
+            } else {
+              const nearest = trajectory[nearestIdx];
               hoverMarker.setLatLng([nearest.lat, nearest.lon]);
               hoverMarker.setStyle({ opacity: 1, fillOpacity: 0.9 });
               updateLegendValues(nearest);
@@ -532,6 +975,136 @@
           map.on("mouseout", () => {
             hoverMarker.setStyle({ opacity: 0, fillOpacity: 0 });
           });
+
+          // ---------- Playback ----------
+          (function setupPlayback() {
+            // Real-clock timeline from point timestamps (epoch ms).
+            const times = trajectory.map(p => Date.parse(p.timestamp));
+            const valid = times.every(t => Number.isFinite(t));
+            if (trajectory.length < 2 || !valid) return;
+
+            const startT = times[0];
+            const endT = times[times.length - 1];
+            const totalMs = endT - startT || 1;
+            const SPEEDS = [0.25, 0.5, 1, 2, 4, 8, 16];
+
+            let speedIdx = SPEEDS.indexOf(1);
+            let playing = false;
+            let playhead = 0;          // ms offset from startT
+            let lastFrame = null;      // wall-clock of previous rAF
+            let rafId = null;
+
+            const PLAY_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v13.72a1 1 0 0 0 1.54.84l10.79-6.86a1 1 0 0 0 0-1.68L9.54 4.3A1 1 0 0 0 8 5.14z"/></svg>';
+            const PAUSE_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5a1 1 0 0 1 1 1v12a1 1 0 0 1-2 0V6a1 1 0 0 1 1-1zm10 0a1 1 0 0 1 1 1v12a1 1 0 0 1-2 0V6a1 1 0 0 1 1-1z"/></svg>';
+
+            const bar = document.getElementById("playback");
+            const playBtn = document.getElementById("pb-play");
+            const scrubber = document.getElementById("pb-scrubber");
+            const timeLabel = document.getElementById("pb-time");
+            const speedLabel = document.getElementById("pb-speed");
+            bar.style.display = "flex";
+            requestAnimationFrame(() => bar.classList.add("ready"));
+
+            const marker = L.circleMarker(
+              [trajectory[0].lat, trajectory[0].lon],
+              { radius: 8, color: "#fff", weight: 2, fillColor: "#1d71b8", fillOpacity: 1 }
+            ).addTo(map);
+
+            function clockText(ms) {
+              return new Date(ms).toISOString().slice(11, 19);
+            }
+
+            // Interpolated point at the current playhead.
+            function pointAt(offset) {
+              const t = startT + offset;
+              let i = 1;
+              while (i < times.length && times[i] < t) i++;
+              if (i >= times.length) return { p: trajectory[trajectory.length - 1], lat: trajectory[trajectory.length - 1].lat, lon: trajectory[trajectory.length - 1].lon };
+              const a = trajectory[i - 1], b = trajectory[i];
+              const span = times[i] - times[i - 1] || 1;
+              const f = Math.max(0, Math.min(1, (t - times[i - 1]) / span));
+              return {
+                p: f < 0.5 ? a : b,
+                lat: a.lat + (b.lat - a.lat) * f,
+                lon: a.lon + (b.lon - a.lon) * f,
+              };
+            }
+
+            function render() {
+              const at = pointAt(playhead);
+              marker.setLatLng([at.lat, at.lon]);
+              hoverMarker.setLatLng([at.lat, at.lon]);
+              hoverMarker.setStyle({ opacity: 1, fillOpacity: 0.9 });
+              updateLegendValues(at.p);
+              const pct = (playhead / totalMs) * 100;
+              scrubber.value = Math.round(pct * 10);
+              scrubber.style.background =
+                `linear-gradient(to right, #1d71b8 ${pct}%, #d7dee6 ${pct}%)`;
+              timeLabel.innerHTML =
+                `${clockText(startT + playhead)} <span class="pb-total">/ ${clockText(endT)}</span>`;
+            }
+
+            function tick(now) {
+              if (!playing) return;
+              if (lastFrame !== null) {
+                playhead += (now - lastFrame) * SPEEDS[speedIdx];
+                if (playhead >= totalMs) { playhead = totalMs; render(); pause(); return; }
+              }
+              lastFrame = now;
+              render();
+              rafId = requestAnimationFrame(tick);
+            }
+
+            function play() {
+              if (playhead >= totalMs) playhead = 0;  // restart from end
+              playing = true;
+              lastFrame = null;
+              playBtn.innerHTML = PAUSE_ICON;
+              rafId = requestAnimationFrame(tick);
+            }
+
+            function pause() {
+              playing = false;
+              if (rafId) cancelAnimationFrame(rafId);
+              playBtn.innerHTML = PLAY_ICON;
+            }
+
+            function updateSpeed() {
+              speedLabel.textContent = `${SPEEDS[speedIdx]}×`;
+            }
+
+            playBtn.addEventListener("click", () => (playing ? pause() : play()));
+            document.getElementById("pb-rewind").addEventListener("click", () => {
+              playhead = 0;
+              lastFrame = null;
+              render();
+            });
+            document.getElementById("pb-slower").addEventListener("click", () => {
+              speedIdx = Math.max(0, speedIdx - 1);
+              updateSpeed();
+            });
+            document.getElementById("pb-faster").addEventListener("click", () => {
+              speedIdx = Math.min(SPEEDS.length - 1, speedIdx + 1);
+              updateSpeed();
+            });
+            scrubber.addEventListener("input", () => {
+              playhead = (scrubber.value / 1000) * totalMs;
+              lastFrame = null;
+              render();
+            });
+
+            // Let map hover drive the playhead: snap to a point's time, pause,
+            // and re-render so the blue dot, scrubber and time all follow.
+            playbackSeekToIndex = (idx) => {
+              if (playing) pause();
+              playhead = Math.max(0, Math.min(totalMs, times[idx] - startT));
+              lastFrame = null;
+              render();
+            };
+
+            updateSpeed();
+            render();
+          })();
 
           // ---------- Safety events ----------
           function renderEvents({ events = [], levels = {} }) {
@@ -545,10 +1118,11 @@
             const counts = {};
             for (const e of events) counts[e.severity] = (counts[e.severity] || 0) + 1;
             document.getElementById("events-chips").innerHTML =
-              Object.keys(counts).sort().reverse().map(sev =>
-                `<span class="sev-chip" style="background:${levels[sev].color}">` +
-                `${counts[sev]} ${levels[sev].name}</span>`
-              ).join(" ");
+              Object.keys(counts).sort().reverse().map(sev => {
+                const c = levels[sev].color;
+                return `<span class="sev-chip" style="color:${c};background:${c}1f">` +
+                  `${counts[sev]}</span>`;
+              }).join("");
 
             for (const e of events) {
               const color = levels[e.severity].color;
@@ -568,9 +1142,16 @@
 
               const row = document.createElement("div");
               row.className = "event-row";
+              row.style.borderLeftColor = color;
               row.innerHTML =
                 `<span class="event-dot" style="background:${color}"></span>` +
-                `<span><span class="event-time">${time}</span> ${e.summary}</span>`;
+                `<div class="event-body">` +
+                  `<div class="event-meta">` +
+                    `<span class="event-time">${time}</span>` +
+                    `<span class="event-sev" style="color:${color};background:${color}1f">${e.severity_name}</span>` +
+                  `</div>` +
+                  `<div class="event-summary">${e.summary}</div>` +
+                `</div>`;
               row.addEventListener("click", () => {
                 map.flyTo([e.lat, e.lon], Math.max(map.getZoom(), 12));
                 marker.openPopup();
@@ -579,13 +1160,265 @@
             }
 
             document.getElementById("events-header").addEventListener("click", () => {
-              const hidden = list.style.display === "none";
-              list.style.display = hidden ? "block" : "none";
-              document.getElementById("events-toggle").textContent = hidden ? "▾" : "▸";
+              const collapsed = panel.classList.toggle("collapsed");
+              list.style.display = collapsed ? "none" : "flex";
             });
           }
 
           renderEvents(eventsData || {});
+
+          // ---------- Helpers (data quality + comparison) ----------
+          const fmt = (v, d = 1) =>
+            Number.isFinite(v) ? (Math.round(v * 10 ** d) / 10 ** d).toString() : "–";
+          const fmtDur = (s) => {
+            if (!Number.isFinite(s)) return "–";
+            if (s < 90) return `${Math.round(s)} s`;
+            return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
+          };
+          const vClass = (v) => (v >= 2 ? "v-good" : v >= 1 ? "v-warn" : "v-bad");
+          const vText = (v) => (v >= 2 ? "OK" : v >= 1 ? "Check" : "Bad");
+
+          function fieldStats(key) {
+            const total = trajectory.length;
+            const present = [];
+            let longestStale = 0, run = 0, prev = null;
+            let maxGap = 0, lastT = null;
+            for (const p of trajectory) {
+              const v = p[key];
+              if (typeof v !== "number") { prev = null; run = 0; continue; }
+              present.push(v);
+              run = (prev !== null && v === prev) ? run + 1 : 1;
+              longestStale = Math.max(longestStale, run);
+              prev = v;
+              const t = Date.parse(p.timestamp);
+              if (lastT !== null && Number.isFinite(t)) maxGap = Math.max(maxGap, (t - lastT) / 1000);
+              if (Number.isFinite(t)) lastT = t;
+            }
+            const n = present.length;
+            if (!n) return { total, n: 0, coverage: 0 };
+            const sum = present.reduce((a, b) => a + b, 0);
+            return {
+              total, n, coverage: n / total,
+              min: Math.min(...present), max: Math.max(...present), avg: sum / n,
+              uniq: new Set(present).size,
+              zeros: present.filter((v) => v === 0).length,
+              longestStale, maxGap,
+            };
+          }
+
+          function avgAbsDiff(keyA, keyB) {
+            let s = 0, n = 0;
+            for (const p of trajectory) {
+              if (typeof p[keyA] === "number" && typeof p[keyB] === "number") {
+                s += Math.abs(p[keyA] - p[keyB]); n++;
+              }
+            }
+            return n ? { diff: s / n, n } : null;
+          }
+
+          function nearestIdx(arr, t) {
+            let lo = 0, hi = arr.length - 1;
+            if (hi < 0) return -1;
+            while (lo < hi) {
+              const mid = (lo + hi) >> 1;
+              if (arr[mid] < t) lo = mid + 1; else hi = mid;
+            }
+            if (lo > 0 && Math.abs(arr[lo - 1] - t) <= Math.abs(arr[lo] - t)) return lo - 1;
+            return lo;
+          }
+
+          function haversine(a, b) {
+            const R = 6371000, toR = Math.PI / 180;
+            const dLat = (b.lat - a.lat) * toR, dLon = (b.lon - a.lon) * toR;
+            const h = Math.sin(dLat / 2) ** 2 +
+              Math.cos(a.lat * toR) * Math.cos(b.lat * toR) * Math.sin(dLon / 2) ** 2;
+            return 2 * R * Math.asin(Math.sqrt(h));
+          }
+
+          const dqRow = (k, v, flag) =>
+            `<div class="dq-row"><span class="k">${k}</span>` +
+            `<span class="v${flag ? " flag" : ""}">${v}</span></div>`;
+
+          // ---------- ADS-B data quality (verify air_speed) ----------
+          function dqFieldBlock(key) {
+            const s = fieldStats(key);
+            const name = labels[key] || key;
+            if (!s.n) {
+              return `<div class="dq-field"><div class="dq-field-name">${name}` +
+                `<span class="dq-verdict v-bad" style="margin-left:auto">No data</span></div>` +
+                `<div class="dq-note">No <b>${name}</b> samples on this flight’s timeline.</div></div>`;
+            }
+            const volV = s.coverage >= 0.85 ? 2 : s.coverage >= 0.5 ? 1 : 0;
+            const staleFrac = s.longestStale / s.n;
+            const liveV = s.uniq <= 1 ? 0 : staleFrac > 0.5 ? 0 : staleFrac > 0.25 ? 1 : 2;
+            const rangeV = (s.max <= 300 && s.min >= 0) ? 2 : (s.max <= 450 && s.min >= -1) ? 1 : 0;
+            const overall = Math.min(volV, liveV, rangeV);
+            const cov = Math.round(s.coverage * 100);
+            const barColor = volV >= 2 ? "#1a8a3c" : volV >= 1 ? "#f4b400" : "#d7191c";
+
+            let rows = "";
+            rows += dqRow("Samples", `${s.n} / ${s.total}`);
+            rows += dqRow("Range", `${fmt(s.min)} – ${fmt(s.max)}`);
+            rows += dqRow("Average", fmt(s.avg));
+            rows += dqRow("Zero values", `${s.zeros}`, s.zeros > s.n * 0.5);
+            rows += dqRow("Distinct values", `${s.uniq}`, s.uniq <= 2);
+            rows += dqRow("Longest frozen run", `${s.longestStale} pts`, staleFrac > 0.25);
+            rows += dqRow("Largest gap", fmtDur(s.maxGap), s.maxGap > 60);
+            if (key === "air_speed") {
+              const ag = avgAbsDiff("air_speed", "ground_speed");
+              if (ag) rows += dqRow("vs ground speed", `±${fmt(ag.diff)} kt`, ag.diff > 30);
+            }
+
+            const dims =
+              `<div style="display:flex;gap:5px;flex-wrap:wrap">` +
+              `<span class="dq-verdict ${vClass(volV)}">Volume ${vText(volV)}</span>` +
+              `<span class="dq-verdict ${vClass(liveV)}">Live ${vText(liveV)}</span>` +
+              `<span class="dq-verdict ${vClass(rangeV)}">Range ${vText(rangeV)}</span></div>`;
+
+            return `<div class="dq-field">` +
+              `<div class="dq-field-name">${name}` +
+              `<span class="dq-verdict ${vClass(overall)}" style="margin-left:auto">${vText(overall)}</span></div>` +
+              `<div class="dq-bar"><span style="width:${cov}%;background:${barColor}"></span></div>` +
+              dqRow("Coverage", `${cov}%`) +
+              dims +
+              `<div class="dq-rows">${rows}</div></div>`;
+          }
+
+          (function renderDataQuality() {
+            const body = document.getElementById("dq-body");
+            const keys = ["air_speed", "ground_speed"].filter(k =>
+              trajectory.some(p => k in p));
+            if (!keys.length) {
+              body.innerHTML = `<div class="dq-note">No ADS-B speed fields on this flight.</div>`;
+              return;
+            }
+            body.innerHTML =
+              `<div class="dq-note">Verify the ADS-B <b>air speed</b> stream: present in the ` +
+              `<b>amount</b> you expect, <b>live</b> (not frozen/all-zero), and in a ` +
+              `<b>plausible</b> range. Use “Compare with FlightRadar” for an external reference.</div>` +
+              keys.map(dqFieldBlock).join("");
+          })();
+
+          // ---------- FlightRadar comparison (full track overlay) ----------
+          const fr24Btn = document.getElementById("btn-fr24");
+          const fr24Label = document.getElementById("btn-fr24-label");
+          const fr24Panel = document.getElementById("fr24-panel");
+          const fr24Body = document.getElementById("fr24-body");
+          let fr24Layer = null;
+
+          function clearFr24() {
+            if (fr24Layer) { map.removeLayer(fr24Layer); fr24Layer = null; }
+            fr24Btn.classList.remove("active");
+            fr24Label.textContent = "Compare with FlightRadar";
+          }
+
+          function renderComparison(json) {
+            const fr = json.trajectory || [];
+            const localTimes = trajectory.map(p => Date.parse(p.timestamp));
+
+            const pairs = [];
+            for (const f of fr) {
+              const t = Date.parse(f.timestamp);
+              if (!Number.isFinite(t)) continue;
+              const idx = nearestIdx(localTimes, t);
+              if (idx < 0 || Math.abs(localTimes[idx] - t) > 10000) continue;
+              pairs.push([trajectory[idx], f]);
+            }
+
+            const m = json.matched_on || {};
+            let html =
+              `<div class="fr24-status">Matched on hex <b>${m.hex || "?"}</b> · ${m.date || "?"}` +
+              ` · FR24 id <b>${json.fr24_id || "?"}</b></div>` +
+              `<div class="fr24-legend"><span class="fr24-swatch ours"></span>Your track` +
+              `&nbsp;&nbsp;<span class="fr24-swatch"></span>FlightRadar</div>` +
+              `<div class="dq-rows">` +
+                dqRow("Points (yours)", `${trajectory.length}`) +
+                dqRow("Points (FR24)", `${fr.length}`) +
+                dqRow("Time-aligned", `${pairs.length}`, pairs.length === 0) +
+              `</div>`;
+
+            if (pairs.length) {
+              const dists = pairs.map(([a, b]) => haversine(a, b)).sort((x, y) => x - y);
+              const med = dists[Math.floor(dists.length / 2)];
+              const pv = med < 50 ? 2 : med < 200 ? 1 : 0;
+              html += `<div class="dq-field"><div class="dq-field-name">Position offset` +
+                `<span class="dq-verdict ${vClass(pv)}" style="margin-left:auto">` +
+                `±${fmt(med, 0)} m</span></div></div>`;
+            }
+
+            const FIELDS = {
+              ground_speed: { good: 3, warn: 8, unit: "kt", ang: false },
+              altitude: { good: 100, warn: 300, unit: "ft", ang: false },
+              track: { good: 5, warn: 15, unit: "°", ang: true },
+              rate_climb: { good: 150, warn: 400, unit: "ft/min", ang: false },
+            };
+            for (const [key, cfg] of Object.entries(FIELDS)) {
+              const diffs = [];
+              for (const [a, b] of pairs) {
+                if (typeof a[key] === "number" && typeof b[key] === "number") {
+                  let d = Math.abs(a[key] - b[key]);
+                  if (cfg.ang) d = Math.min(d, 360 - d);
+                  diffs.push(d);
+                }
+              }
+              if (!diffs.length) continue;
+              const avg = diffs.reduce((sm, x) => sm + x, 0) / diffs.length;
+              const mx = Math.max(...diffs);
+              const v = avg <= cfg.good ? 2 : avg <= cfg.warn ? 1 : 0;
+              html += `<div class="dq-field"><div class="dq-field-name">${labels[key] || key}` +
+                `<span class="dq-verdict ${vClass(v)}" style="margin-left:auto">${vText(v)}</span></div>` +
+                `<div class="dq-rows">` +
+                  dqRow("Avg Δ", `${fmt(avg)} ${cfg.unit}`) +
+                  dqRow("Max Δ", `${fmt(mx)} ${cfg.unit}`) +
+                  dqRow("Compared", `${diffs.length}`) +
+                `</div></div>`;
+            }
+
+            html += `<div class="dq-note"><b>Air speed:</b> FlightRadar publishes ` +
+              `<b>ground speed</b>, so there’s no direct airspeed reference. Judge your ` +
+              `<b>air_speed</b> stream from the ground-speed agreement above plus the ` +
+              `data-quality checks.</div>`;
+
+            fr24Body.innerHTML = html;
+          }
+
+          fr24Btn.addEventListener("click", async () => {
+            if (fr24Layer) { clearFr24(); return; }
+            fr24Btn.disabled = true;
+            fr24Label.textContent = "Loading…";
+            fr24Panel.style.display = "flex";
+            fr24Panel.classList.remove("collapsed");
+            fr24Body.innerHTML =
+              `<div class="fr24-status">Fetching the same flight from FlightRadar…</div>`;
+            try {
+              const res = await fetch(`/flight/${flightId}/fr24`);
+              const json = await res.json();
+              if (!res.ok) throw new Error(json.error || `Request failed (${res.status})`);
+              const pts = (json.trajectory || [])
+                .filter(p => typeof p.lat === "number" && typeof p.lon === "number")
+                .map(p => [p.lat, p.lon]);
+              if (pts.length) {
+                fr24Layer = L.polyline(pts, {
+                  color: "#f26419", weight: 3, dashArray: "6 6", opacity: 0.9,
+                }).addTo(map);
+              }
+              renderComparison(json);
+              fr24Btn.classList.add("active");
+              fr24Label.textContent = "Hide FlightRadar";
+            } catch (err) {
+              fr24Body.innerHTML =
+                `<div class="fr24-status error"><b>Couldn’t load FlightRadar data.</b><br>` +
+                `${err.message}</div>`;
+              fr24Label.textContent = "Compare with FlightRadar";
+            } finally {
+              fr24Btn.disabled = false;
+            }
+          });
+
+          document.getElementById("dq-header").addEventListener("click", () =>
+            document.getElementById("dq-panel").classList.toggle("collapsed"));
+          document.getElementById("fr24-header").addEventListener("click", () =>
+            fr24Panel.classList.toggle("collapsed"));
 
           // 🎉 Hide loader AFTER everything is rendered
           setTimeout(hideLoader, 300);
