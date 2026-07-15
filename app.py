@@ -309,12 +309,82 @@ def build_trajectory_payload(df: pd.DataFrame) -> dict:
     return {"trajectory": trajectory, "fields": value_fields}
 
 
+def _fmt_duration(seconds) -> str | None:
+    """Seconds → "1h 57m" / "42m", for the index cards."""
+    if not seconds or seconds <= 0:
+        return None
+    minutes = int(seconds // 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
+
+
+def _summarize(flight_id: str, df: pd.DataFrame, trajectory: list, events: list,
+               raw_path: Path) -> dict:
+    """Compact, display-ready flight card data — written as a tiny sidecar so
+    the index never has to parse the (potentially large) full cache."""
+    by_severity = {"notice": 0, "caution": 0, "danger": 0}
+    names = {1: "notice", 2: "caution", 3: "danger"}
+    for e in events:
+        key = names.get(e.get("severity"))
+        if key:
+            by_severity[key] += 1
+
+    date_str = t_start = t_end = None
+    duration_s = None
+    if "timestamp" in df.columns:
+        ts = df["timestamp"].dropna()
+        if len(ts):
+            tmin, tmax = ts.min(), ts.max()
+            date_str = tmin.strftime("%d %b %Y")
+            t_start = tmin.strftime("%H:%M")
+            t_end = tmax.strftime("%H:%M")
+            duration_s = (tmax - tmin).total_seconds()
+
+    def _num_max(col):
+        if col in df.columns:
+            s = pd.to_numeric(df[col], errors="coerce").dropna()
+            if not s.empty:
+                return round(float(s.max()), 1)
+        return None
+
+    def _mode_str(col):
+        if col in df.columns:
+            s = df[col].dropna()
+            if not s.empty:
+                return str(s.mode().iloc[0])
+        return None
+
+    points = len(trajectory)
+    return {
+        "points": points,
+        "points_str": f"{points:,}",
+        "date": date_str,
+        "time_start": t_start,
+        "time_end": t_end,
+        "duration_str": _fmt_duration(duration_s),
+        "callsign": _mode_str("callsign"),
+        "hex_id": _mode_str("hex_id"),
+        "max_altitude": _num_max("altitude"),
+        "max_ground_speed": _num_max("ground_speed"),
+        "events": {"total": len(events), "by_severity": by_severity},
+        "source_mtime": raw_path.stat().st_mtime if raw_path.is_file() else None,
+        "processed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _atomic_write_json(path: Path, data) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w") as f:
+        json.dump(data, f)
+    tmp.replace(path)  # atomic: never serve a half-written file
+
+
 def process_flight(flight_id: str) -> dict:
     """Run the full pipeline for one flight and cache the result to disk.
 
-    Writes data/processed/<id>.json with the trajectory, field list and
-    detected safety events, plus the source file's mtime so staleness can be
-    detected. Called on ingest and by the manual /process endpoint only.
+    Writes data/processed/<id>.json (trajectory, field list, detected safety
+    events, source mtime for staleness) plus a small <id>.summary.json the
+    index reads. Called on ingest and by the manual /process endpoint only.
     """
     df = load_flight_data(flight_id)
 
@@ -330,13 +400,24 @@ def process_flight(flight_id: str) -> dict:
         "processed_at": datetime.now(timezone.utc).isoformat(),
         "source_mtime": raw_path.stat().st_mtime if raw_path.is_file() else None,
     }
+    summary = _summarize(flight_id, df, payload["trajectory"], events, raw_path)
 
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = PROCESSED_DIR / f"{flight_id}.json.tmp"
-    with open(tmp, "w") as f:
-        json.dump(cache, f)
-    tmp.replace(PROCESSED_DIR / f"{flight_id}.json")  # atomic: never serve a half-written cache
+    _atomic_write_json(PROCESSED_DIR / f"{flight_id}.json", cache)
+    _atomic_write_json(PROCESSED_DIR / f"{flight_id}.summary.json", summary)
     return cache
+
+
+def load_summary(flight_id: str) -> dict | None:
+    """Read a flight's small summary sidecar, or None if not processed."""
+    path = PROCESSED_DIR / f"{flight_id}.summary.json"
+    if not path.is_file():
+        return None
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
 def load_processed(flight_id: str) -> dict | None:
@@ -363,14 +444,27 @@ def _is_stale(flight_id: str, cache: dict) -> bool:
 
 
 def flight_status() -> list:
-    """Flight ids with their processing state, for the index page."""
+    """Flight ids with processing state + summary, for the index page.
+
+    Reads only the small summary sidecar (never the full cache), so the index
+    stays fast even for flights with tens of thousands of points.
+    """
     out = []
     for fid in list_flights():
-        cache = load_processed(fid)
+        processed = (PROCESSED_DIR / f"{fid}.json").is_file()
+        summary = load_summary(fid) if processed else None
+
+        stale = False
+        if processed and summary and summary.get("source_mtime") is not None:
+            raw = PARSED_DIR / f"{fid}.json"
+            if raw.is_file() and raw.stat().st_mtime > summary["source_mtime"] + 1e-6:
+                stale = True
+
         out.append({
             "id": fid,
-            "processed": cache is not None,
-            "stale": cache is not None and _is_stale(fid, cache),
+            "processed": processed,
+            "stale": stale,
+            "summary": summary,
         })
     return out
 
