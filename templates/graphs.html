@@ -53,6 +53,12 @@
       color: white;
     }
 
+    .btn-reprocess { background: #e9ecef; color: #495057; }
+    .btn-reprocess:disabled { opacity: 0.65; cursor: progress; }
+    .btn-reprocess.stale { background: #fff4e0; color: #b06a00; }
+
+    .empty .btn { margin-top: 12px; }
+
     #charts {
       padding: 18px;
       display: grid;
@@ -118,6 +124,7 @@
     <div class="title">Graphs: {{flight_id}}</div>
     <div class="btn-group">
       <button class="btn btn-back" onclick="window.location='/'">Back</button>
+      <button class="btn btn-reprocess" id="btn-reprocess" title="Recompute trajectory & safety events from stored data">Reprocess</button>
       <button class="btn btn-map" onclick="window.location='/flight/{{flight_id}}'">Show Map</button>
     </div>
   </div>
@@ -131,12 +138,49 @@
 
   <script>
     const charts = document.getElementById("charts");
+    const flightId = "{{flight_id}}";
 
     function addTextCard(text) {
       const div = document.createElement("div");
       div.className = "empty";
       div.textContent = text;
       charts.appendChild(div);
+    }
+
+    // Manual (re)processing trigger, shared by the header button and the
+    // "not processed yet" card. Reloads on success.
+    async function triggerProcess(btn, labelBusy) {
+      const original = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = labelBusy;
+      try {
+        const res = await fetch(`/api/flights/${encodeURIComponent(flightId)}/process`, { method: "POST" });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          throw new Error(j.detail || `Failed (${res.status})`);
+        }
+        location.reload();
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = original;
+        alert("Processing failed: " + err.message);
+      }
+    }
+
+    document.getElementById("btn-reprocess").addEventListener("click", (e) =>
+      triggerProcess(e.currentTarget, "Reprocessing…"));
+
+    // Shown when the flight has no cached data yet.
+    function addProcessCard() {
+      const div = document.createElement("div");
+      div.className = "empty";
+      div.innerHTML =
+        "<b>This flight hasn’t been processed yet.</b><br>" +
+        "Graphs are generated when data is loaded or on demand, not on every view.<br>" +
+        '<button class="btn btn-map" id="proc-btn">Process this flight</button>';
+      charts.appendChild(div);
+      document.getElementById("proc-btn").addEventListener("click", (e) =>
+        triggerProcess(e.currentTarget, "Processing…"));
     }
 
     function hexToRgba(hex, alpha) {
@@ -149,6 +193,8 @@
       fetch(`/flight/{{flight_id}}/events`).then(res => res.json()),
     ])
       .then(([data, eventsData]) => {
+        if (data.needs_processing) { addProcessCard(); return; }
+
         const trajectory = data.trajectory || [];
         if (trajectory.length === 0) {
           addTextCard("No trajectory data available for this flight.");

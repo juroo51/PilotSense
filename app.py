@@ -3,6 +3,7 @@ import os
 import re
 import secrets
 from datetime import datetime, timezone
+from math import isnan
 from pathlib import Path
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -14,6 +15,11 @@ from analysis import SEVERITY_LEVELS, analyze_flight
 import fr24_client
 
 PARSED_DIR = Path("data/parsed")
+
+# Pre-processed per-flight caches (trajectory + safety events). These are
+# (re)built when data is ingested or the /process endpoint is called — never
+# on a plain view request, which only reads what is already here.
+PROCESSED_DIR = Path("data/processed")
 
 # Max accepted upload size per request (bytes)
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
@@ -229,6 +235,145 @@ GROUP_ATTITUDE = ["pitch", "roll", "yaw"]
 GROUP_ADSB_POSITION = ["latitude", "longitude"]
 GROUP_ADSB_MOVEMENT = ["ground_speed", "track", "heading"]
 
+# Raw IMU channels never sent to the UI.
+HIDDEN_FIELDS = {"gyroX", "gyroY", "gyroZ", "magX", "magY", "magZ"}
+
+
+def _trajectory_groups() -> dict:
+    """Static field-grouping config shared by the map and graphs pages."""
+    return {
+        "accel": GROUP_ACCEL,
+        "att": GROUP_ATTITUDE,
+        "adsb_position": GROUP_ADSB_POSITION,
+        "adsb_movement": GROUP_ADSB_MOVEMENT,
+    }
+
+
+# ------------------ PRE-PROCESSING / CACHE ------------------
+#
+# The expensive work (parsing raw NDJSON, merging, rounding every point, and
+# running the safety detectors) happens once here and is cached to disk. View
+# requests read the cache; they never rebuild it. Static config (friendly
+# labels, group definitions, severity colors) is injected at serve time so
+# tweaking it doesn't require reprocessing.
+
+def build_trajectory_payload(df: pd.DataFrame) -> dict:
+    """Turn a merged flight DataFrame into the data-dependent trajectory payload.
+
+    Returns {"trajectory": [...points...], "fields": [...value field names...]}.
+    Labels/groups are added by the endpoint, not stored, so they stay live.
+    """
+    if df.empty:
+        return {"trajectory": [], "fields": []}
+
+    df = df.sort_values("timestamp")
+
+    all_fields = set(df.columns)
+    required = {"latitude", "longitude", "timestamp"}
+    value_fields = sorted(
+        f for f in all_fields if f not in required and f not in HIDDEN_FIELDS
+    )
+
+    def clean(val):
+        """NaN / inf → None, JSON-safe."""
+        try:
+            if val is None:
+                return None
+            if isinstance(val, float) and (isnan(val) or val in (float("inf"), float("-inf"))):
+                return None
+            return val
+        except Exception:
+            return None
+
+    trajectory = []
+    for _, row in df.iterrows():
+        if pd.isna(row.get("latitude")) or pd.isna(row.get("longitude")):
+            continue
+
+        point = {
+            "lat": float(row["latitude"]),
+            "lon": float(row["longitude"]),
+            "timestamp": row["timestamp"].isoformat(),
+        }
+        for field in value_fields:
+            raw = row.get(field)
+            if raw is None or pd.isna(raw):
+                point[field] = None
+            elif isinstance(raw, (int, float)):
+                cleaned = clean(raw)
+                point[field] = round(cleaned, 2) if cleaned is not None else None
+            else:
+                point[field] = raw
+        trajectory.append(point)
+
+    return {"trajectory": trajectory, "fields": value_fields}
+
+
+def process_flight(flight_id: str) -> dict:
+    """Run the full pipeline for one flight and cache the result to disk.
+
+    Writes data/processed/<id>.json with the trajectory, field list and
+    detected safety events, plus the source file's mtime so staleness can be
+    detected. Called on ingest and by the manual /process endpoint only.
+    """
+    df = load_flight_data(flight_id)
+
+    payload = build_trajectory_payload(df)
+    events = [] if df.empty else analyze_flight(df.sort_values("timestamp"))["events"]
+
+    raw_path = PARSED_DIR / f"{flight_id}.json"
+    cache = {
+        "flight_id": flight_id,
+        "trajectory": payload["trajectory"],
+        "fields": payload["fields"],
+        "events": events,
+        "processed_at": datetime.now(timezone.utc).isoformat(),
+        "source_mtime": raw_path.stat().st_mtime if raw_path.is_file() else None,
+    }
+
+    PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = PROCESSED_DIR / f"{flight_id}.json.tmp"
+    with open(tmp, "w") as f:
+        json.dump(cache, f)
+    tmp.replace(PROCESSED_DIR / f"{flight_id}.json")  # atomic: never serve a half-written cache
+    return cache
+
+
+def load_processed(flight_id: str) -> dict | None:
+    """Read a flight's cached payload, or None if it hasn't been processed."""
+    path = PROCESSED_DIR / f"{flight_id}.json"
+    if not path.is_file():
+        return None
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _is_stale(flight_id: str, cache: dict) -> bool:
+    """True if the raw file changed after the cache was written."""
+    raw_path = PARSED_DIR / f"{flight_id}.json"
+    if not raw_path.is_file():
+        return False
+    cached = cache.get("source_mtime")
+    if cached is None:
+        return True
+    return raw_path.stat().st_mtime > cached + 1e-6
+
+
+def flight_status() -> list:
+    """Flight ids with their processing state, for the index page."""
+    out = []
+    for fid in list_flights():
+        cache = load_processed(fid)
+        out.append({
+            "id": fid,
+            "processed": cache is not None,
+            "stale": cache is not None and _is_stale(fid, cache),
+        })
+    return out
+
 
 # ------------------ DATA INGESTION ------------------
 
@@ -288,16 +433,49 @@ async def ingest_flight_data(
             continue
         accepted_lines.append(normalized)
 
+    processed = None
     if accepted_lines:
         PARSED_DIR.mkdir(parents=True, exist_ok=True)
         with open(PARSED_DIR / f"{safe_id}.json", "a") as f:
             f.write("\n".join(accepted_lines) + "\n")
+        # New data loaded → regenerate the cached trajectory + safety events so
+        # view pages serve the update without recomputing on every request.
+        cache = process_flight(safe_id)
+        processed = {
+            "points": len(cache["trajectory"]),
+            "events": len(cache["events"]),
+            "processed_at": cache["processed_at"],
+        }
 
     return {
         "flight_id": safe_id,
         "device_id": x_device_id,
         "accepted": len(accepted_lines),
         "rejected": rejected,
+        "processed": processed,
+    }
+
+
+@app.post("/api/flights/{flight_id}/process")
+async def process_flight_endpoint(flight_id: str):
+    """Manually (re)build a flight's cached trajectory + safety events.
+
+    This is the on-demand trigger: it recomputes from the flight's stored data
+    and refreshes the cache the view pages read. No device auth — it only
+    reprocesses local data, it doesn't accept new input.
+    """
+    safe_id = _sanitize_flight_id(flight_id)
+    if not safe_id or safe_id != flight_id:
+        raise HTTPException(status_code=400, detail="Invalid flight id")
+    if not (PARSED_DIR / f"{safe_id}.json").is_file():
+        raise HTTPException(status_code=404, detail="No data for this flight")
+
+    cache = process_flight(safe_id)
+    return {
+        "flight_id": safe_id,
+        "points": len(cache["trajectory"]),
+        "events": len(cache["events"]),
+        "processed_at": cache["processed_at"],
     }
 
 
@@ -305,101 +483,44 @@ async def ingest_flight_data(
 
 @app.get("/flight/{flight_id}/trajectory")
 async def flight_trajectory(flight_id: str):
-    df = load_flight_data(flight_id)
-    if not df.empty:
-        df = df.sort_values("timestamp")
+    """Serve the pre-processed trajectory. Does not compute anything: if the
+    flight hasn't been processed yet, returns 409 so the UI can offer to
+    process it (see POST /api/flights/{id}/process)."""
+    static = {"labels": FRIENDLY_NAMES, "groups": _trajectory_groups()}
 
-    if df.empty:
-        return {
+    cache = load_processed(flight_id)
+    if cache is None:
+        return JSONResponse(status_code=409, content={
+            "error": "Flight not processed yet. Process it before visualizing.",
+            "needs_processing": True,
             "trajectory": [],
             "fields": [],
-            "labels": FRIENDLY_NAMES,
-            "groups": {
-                "accel": GROUP_ACCEL,
-                "att": GROUP_ATTITUDE,
-                "adsb_position": GROUP_ADSB_POSITION,
-                "adsb_movement": GROUP_ADSB_MOVEMENT
-            }
-        }
-
-    # All available fields
-    all_fields = set(df.columns)
-
-    # SPECIAL latitude/longitude used by the map
-    required = {"latitude", "longitude", "timestamp"}
-
-    # Hidden internal IMU fields
-    HIDDEN_FIELDS = {"gyroX", "gyroY", "gyroZ", "magX", "magY", "magZ"}
-
-    # Value fields = everything except timestamp, lat/lon, hidden
-    value_fields = sorted([
-        f for f in all_fields
-        if f not in required and f not in HIDDEN_FIELDS
-    ])
-
-    from math import isnan
-
-    def clean(val):
-        """Convert NaN / inf → None SAFE for JSON."""
-        try:
-            if val is None:
-                return None
-            if isinstance(val, float) and (isnan(val) or val in (float("inf"), float("-inf"))):
-                return None
-            return val
-        except:
-            return None
-
-
-    trajectory = []
-    for _, row in df.iterrows():
-        # Skip invalid coordinates
-        if pd.isna(row.get("latitude")) or pd.isna(row.get("longitude")):
-            continue
-
-        point = {
-            "lat": float(row["latitude"]),
-            "lon": float(row["longitude"]),
-            "timestamp": row["timestamp"].isoformat()
-        }
-
-        # Add all user-visible fields
-        for field in value_fields:
-            raw = row.get(field)
-
-            if raw is None or pd.isna(raw):
-                point[field] = None
-            else:
-                # Round floats only
-                if isinstance(raw, (int, float)):
-                    cleaned = clean(raw)
-                    point[field] = round(cleaned, 2) if cleaned is not None else None
-                else:
-                    point[field] = raw
-
-        trajectory.append(point)
-
+            **static,
+        })
 
     return {
-        "trajectory": trajectory,
-        "fields": value_fields,
-        "labels": FRIENDLY_NAMES,
-        "groups": {
-            "accel": GROUP_ACCEL,
-            "att": GROUP_ATTITUDE,
-            "adsb_position": GROUP_ADSB_POSITION,
-            "adsb_movement": GROUP_ADSB_MOVEMENT
-        }
+        "trajectory": cache["trajectory"],
+        "fields": cache["fields"],
+        "stale": _is_stale(flight_id, cache),
+        **static,
     }
 
 
 @app.get("/flight/{flight_id}/events")
 async def flight_events(flight_id: str):
-    """Safety events detected in the flight (see analysis.py)."""
-    df = load_flight_data(flight_id)
-    if df.empty:
-        return {"events": [], "levels": SEVERITY_LEVELS}
-    return analyze_flight(df.sort_values("timestamp"))
+    """Serve the pre-processed safety events (see analysis.py). Like the
+    trajectory endpoint, this only reads the cache — it never re-runs the
+    detectors."""
+    cache = load_processed(flight_id)
+    if cache is None:
+        return JSONResponse(status_code=409, content={
+            "error": "Flight not processed yet.",
+            "needs_processing": True,
+            "events": [],
+            "levels": SEVERITY_LEVELS,
+        })
+
+    return {"events": cache.get("events", []), "levels": SEVERITY_LEVELS}
 
 
 @app.get("/flight/{flight_id}/fr24")
@@ -443,10 +564,9 @@ async def flight_fr24(flight_id: str, fr24_id: str | None = None):
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    flights = list_flights()
     return templates.TemplateResponse("index.html", {
         "request": request,
-        "flights": flights
+        "flights": flight_status(),
     })
 
 

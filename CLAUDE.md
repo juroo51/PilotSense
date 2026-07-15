@@ -23,6 +23,10 @@ python tools/parse.py   # reads data/flights.json, writes data/parsed/<FLIGHT_ID
 
 # Generate a synthetic flight that triggers safety events at every severity
 python tools/make_demo_flight.py   # writes data/parsed/DEMO-EVENTS.json
+
+# Pre-process flights into the view cache (trajectory + safety events).
+# Run once to bootstrap existing flights, or any time to rebuild caches.
+python tools/process.py            # all flights; or pass flight ids to limit
 ```
 
 There are no tests or linters configured.
@@ -33,7 +37,9 @@ Server-side code is [app.py](app.py) (routes, data loading) and [analysis.py](an
 
 **Safety analysis:** `analysis.py` runs detectors (`DETECTORS` list) over the merged flight DataFrame and emits events with severity 1–3 (Notice/Caution/Danger, colors in `SEVERITY_LEVELS`). Each detector groups consecutive exceedances into one event with a peak value and a human-readable `summary`. `GET /flight/{flight_id}/events` serves them; the map shows severity-colored markers plus a clickable events panel, the graphs page shades event time bands on every chart and lists explanations in a summary card. Thresholds are calibrated for light aircraft — tune them in the detector docstrings/code together.
 
-**Data flow:** raw NDJSON logs → `tools/parse.py` splits them by the `f` (flight/callsign) field into `data/parsed/<FLIGHT_ID>.json` → `app.py` reads those files on every request (no database, no caching). The flight list on the index page is simply the filenames in `data/parsed/`.
+**Data flow:** raw NDJSON logs → `tools/parse.py` splits them by the `f` (flight/callsign) field into `data/parsed/<FLIGHT_ID>.json` → **pre-processing** (`process_flight()` in app.py) merges + rounds the trajectory and runs the safety detectors once, caching the result to `data/parsed`'s sibling `data/processed/<FLIGHT_ID>.json`. The flight list on the index page is the filenames in `data/parsed/`, each shown with its processing state.
+
+**Pre-processing vs. viewing (important):** the expensive work happens at *load/trigger time*, not view time. `process_flight()` runs (a) automatically when a device ingests new data and (b) on demand via `POST /api/flights/{id}/process` (the index "Process/Reprocess" buttons and the map/graphs "Reprocess" button). The view endpoints (`/trajectory`, `/events`) **only read the cache and never recompute** — if a flight has no cache they return `409` with `needs_processing: true`, and the UI offers a Process button instead of rendering. Static config (friendly labels, groups, severity levels) is injected at serve time, so tweaking it doesn't require reprocessing; a cache is flagged `stale` when the raw file's mtime is newer than the cache. `tools/process.py` bootstraps/rebuilds caches from the CLI. (`GET /flight/{id}/fr24` still loads the raw file directly, since it's a manual, on-click action that needs the source DataFrame.)
 
 **Data format:** each per-flight file is NDJSON, one JSON object per line. Lines are heterogeneous — a line may carry GPS fields (`Gps_lat`, `Gps_lon`, `Gps_datum`, `Gps_time`, ...), ADS-B fields (`Adsb_HexId`, `Adsb_alt`, `Adsb_callsign`, ...), and/or IMU fields (`accX`, `pitch`, ...). `load_flight_data()` in app.py merges these into one timeline: it accumulates the latest ADS-B state across lines and emits a DataFrame row only when a line contains a GPS fix, attaching the last-known ADS-B values to it.
 
@@ -43,7 +49,7 @@ Server-side code is [app.py](app.py) (routes, data loading) and [analysis.py](an
 - GPS timestamps use a two-digit-year format `DD-MM-YY HH:MM:SS` (UTC).
 - Lines with `Gps_data: "no_data"` carry lat/lon `0.0` and are skipped.
 
-**Data ingestion:** `POST /api/flights/{flight_id}/data` accepts a batch of raw NDJSON log lines from authorized devices and appends them to `data/parsed/<flight_id>.json`. Auth is per-device via `X-Device-Id` + `X-Api-Key` headers, checked against the `PILOTSENSE_DEVICE_KEYS` env var (`"device1:key1,device2:key2"`); the endpoint returns 503 when no keys are configured. Lines are validated with the same lenient parser (`_parse_log_line`) the loader uses; the response reports accepted/rejected counts.
+**Data ingestion:** `POST /api/flights/{flight_id}/data` accepts a batch of raw NDJSON log lines from authorized devices and appends them to `data/parsed/<flight_id>.json`. Auth is per-device via `X-Device-Id` + `X-Api-Key` headers, checked against the `PILOTSENSE_DEVICE_KEYS` env var (`"device1:key1,device2:key2"`); the endpoint returns 503 when no keys are configured. Lines are validated with the same lenient parser (`_parse_log_line`) the loader uses; the response reports accepted/rejected counts. After a successful append the endpoint **reprocesses the flight** (rebuilding its `data/processed/` cache) and reports the resulting point/event counts under `processed`.
 
 **Single JSON API:** `GET /flight/{flight_id}/trajectory` returns `{trajectory, fields, labels, groups}`. Both frontends (map and graphs) consume this same endpoint:
 - `trajectory` is a list of points (lat/lon/timestamp plus every value field, floats rounded to 2 decimals, NaN/inf → null).
