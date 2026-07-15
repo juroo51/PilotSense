@@ -103,13 +103,16 @@
       }
 
       .grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(312px, 1fr));
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
         gap: 18px;
       }
 
       /* ---------------- CARD ---------------- */
       .card {
+        flex: 1 1 320px;
+        max-width: 380px;
         background: #fff;
         border: 1px solid var(--line);
         border-radius: 16px;
@@ -265,7 +268,7 @@
       .btn-proc:disabled { opacity: 0.6; cursor: progress; }
 
       .empty {
-        grid-column: 1 / -1;
+        flex: 1 1 100%;
         text-align: center;
         color: var(--muted);
         background: #fff;
