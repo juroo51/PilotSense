@@ -210,6 +210,39 @@
         border-left-color: #1d71b8;
       }
 
+      /* Message-source rows: plot per-message receipt points instead of a line */
+      #legend-msg-sep {
+        border-top: 1px solid #e9ecef;
+        margin: 6px 8px 2px;
+      }
+      .legend-row.message { cursor: pointer; }
+      .legend-row.message:hover { background: #eef3f8; }
+      .legend-row.message .legend-label::before {
+        content: "◇ ";
+        color: #adb5bd;
+      }
+      .legend-row.message.active .legend-label::before {
+        content: "◆ ";
+        color: #f26419;
+      }
+      .legend-row.message.active {
+        background: #fff1e8;
+        border-left-color: #f26419;
+      }
+
+      /* Coverage-outage rows: highlight where a source went silent */
+      .legend-row.outage { cursor: pointer; }
+      .legend-row.outage:hover { background: #fdecec; }
+      .legend-row.outage .legend-label::before {
+        content: "⚠ ";
+        color: #e0a3a3;
+      }
+      .legend-row.outage.active .legend-label::before { color: #d7191c; }
+      .legend-row.outage.active {
+        background: #fdecec;
+        border-left-color: #d7191c;
+      }
+
       /* Gradient color scale */
       #colorbar {
         display: none;
@@ -714,7 +747,7 @@
     <div id="sidebar">
         <div id="legend">
             <div id="legend-title">{{flight_id}}</div>
-            <div id="legend-hint">Hover the track for values.<br>Click a ◌ metric to color the track by it.</div>
+            <div id="legend-hint">Hover the track for values.<br>Click a ◌ metric to color, a ◇ source for message points, or ⚠ for coverage gaps.</div>
             <div id="legend-rows">Loading…</div>
             <div id="colorbar">
                 <div id="colorbar-name"></div>
@@ -859,6 +892,8 @@
           }
 
           const trajectory = data.trajectory || [];
+          const adsbMessages = data.adsb_messages || [];
+          const outages = data.outages || { gps: [], adsb: [] };
           const labels = data.labels || {};
           const points = trajectory.map(p => [p.lat, p.lon]);
 
@@ -894,6 +929,9 @@
 
           const valueCells = {};
           let colorKey = null;
+          let overlay = null;       // null | { kind: "messages"|"outages", origin: "gps"|"adsb" }
+          let overlayLayer = null;
+          let eventLayer = null;    // safety-event markers, hidden while an overlay is active
 
           function buildLegend() {
             const rowsEl = document.getElementById("legend-rows");
@@ -927,6 +965,42 @@
               }
               rowsEl.appendChild(row);
             }
+
+            // Extra rows per source: message-receipt points, and coverage
+            // outages (where the source went silent). Counts are shown up front
+            // so a glance tells you whether coverage was clean.
+            const gpsCount = trajectory.length;
+            const adsbCount = adsbMessages.length;
+            const extraRows = [];
+            if (gpsCount) extraRows.push({ kind: "messages", origin: "gps", cls: "message", label: "GPS messages", count: gpsCount });
+            if (adsbCount) extraRows.push({ kind: "messages", origin: "adsb", cls: "message", label: "ADSB messages", count: adsbCount });
+            if (gpsCount) extraRows.push({ kind: "outages", origin: "gps", cls: "outage", label: "GPS outages", count: (outages.gps || []).length });
+            if (adsbCount) extraRows.push({ kind: "outages", origin: "adsb", cls: "outage", label: "ADSB outages", count: (outages.adsb || []).length });
+
+            if (extraRows.length) {
+              const sep = document.createElement("div");
+              sep.id = "legend-msg-sep";
+              rowsEl.appendChild(sep);
+              for (const s of extraRows) {
+                const row = document.createElement("div");
+                row.className = "legend-row " + s.cls;
+                row.dataset.kind = s.kind;
+                row.dataset.origin = s.origin;
+
+                const label = document.createElement("span");
+                label.className = "legend-label";
+                label.textContent = s.label;
+
+                const value = document.createElement("span");
+                value.className = "legend-value";
+                value.textContent = s.count.toLocaleString();
+                if (s.cls === "outage" && s.count > 0) value.style.color = "#d7191c";
+
+                row.append(label, value);
+                row.addEventListener("click", () => setOverlay(s.kind, s.origin));
+                rowsEl.appendChild(row);
+              }
+            }
           }
 
           function updateLegendValues(point) {
@@ -940,6 +1014,7 @@
           // ---------- Gradient coloring ----------
           function setColorKey(key) {
             colorKey = key;
+            if (key) clearOverlay();   // coloring + overlays are mutually exclusive
             segmentGroup.clearLayers();
 
             document.querySelectorAll(".legend-row.numeric").forEach(row =>
@@ -981,6 +1056,100 @@
             document.getElementById("colorbar-min").textContent = formatNumber(min);
             document.getElementById("colorbar-max").textContent = formatNumber(max);
             colorbar.style.display = "block";
+          }
+
+          // ---------- Overlay modes: message points & coverage outages ----------
+          // Safety-event markers are shown only when no overlay owns the map,
+          // so the message/outage dots aren't cluttered by them.
+          function updateEventVisibility() {
+            if (!eventLayer) return;
+            if (overlay) {
+              if (map.hasLayer(eventLayer)) map.removeLayer(eventLayer);
+            } else if (!map.hasLayer(eventLayer)) {
+              eventLayer.addTo(map);
+            }
+          }
+
+          function clearOverlay() {
+            overlay = null;
+            if (overlayLayer) { map.removeLayer(overlayLayer); overlayLayer = null; }
+            document.querySelectorAll(".legend-row.message, .legend-row.outage")
+              .forEach(r => r.classList.remove("active"));
+            updateEventVisibility();
+          }
+
+          // A dot at every point where a message from this source (GPS fix, or
+          // interpolated ADS-B) was received. Hover a dot to see when.
+          function buildMessagesLayer(origin) {
+            const pts = origin === "gps" ? trajectory : adsbMessages;
+            const color = origin === "gps" ? "#1d71b8" : "#f26419";
+            const layer = L.layerGroup();
+            for (const m of pts) {
+              if (typeof m.lat !== "number" || typeof m.lon !== "number") continue;
+              const when = m.timestamp ? m.timestamp.replace("T", " ").slice(0, 19) + " UTC" : "";
+              L.circleMarker([m.lat, m.lon], {
+                radius: 3.2, color: "#fff", weight: 1,
+                fillColor: color, fillOpacity: 0.9,
+                renderer: canvasRenderer, interactive: true,
+              }).bindTooltip(when, { direction: "top" }).addTo(layer);
+            }
+            return layer;
+          }
+
+          // Faint reference track + a bold red segment for every stretch where
+          // this source went silent, each with a ⚠ marker (duration + time).
+          function buildOutagesLayer(origin) {
+            const list = outages[origin] || [];
+            const label = origin === "gps" ? "GPS" : "ADS-B";
+            const layer = L.layerGroup();
+            if (points.length) {
+              L.polyline(points, {
+                color: "#9aa9b8", weight: 2, opacity: 0.55,
+                renderer: canvasRenderer, interactive: false,
+              }).addTo(layer);
+            }
+            for (const o of list) {
+              const path = o.path || [];
+              if (path.length >= 2) {
+                L.polyline(path, { color: "#d7191c", weight: 5, opacity: 0.9, dashArray: "5 7" }).addTo(layer);
+              }
+              const mid = path.length ? path[Math.floor(path.length / 2)] : null;
+              if (!mid) continue;
+              const t0 = o.start.slice(11, 19), t1 = o.end.slice(11, 19);
+              L.circleMarker(mid, {
+                radius: 7, color: "#fff", weight: 2,
+                fillColor: "#d7191c", fillOpacity: 0.95,
+              }).bindPopup(
+                `<b style="color:#d7191c">No ${label} signal</b> · gap of ${fmtDur(o.duration_s)}` +
+                `<br><span style="color:#868e96">${t0}–${t1} UTC</span>`
+              ).addTo(layer);
+            }
+            return layer;
+          }
+
+          // Swap the main track for an overlay view. Clicking the active row
+          // again returns to the default line. Overlays, metric coloring, and
+          // the default line are mutually exclusive.
+          function setOverlay(kind, origin) {
+            const same = overlay && overlay.kind === kind && overlay.origin === origin;
+
+            clearOverlay();
+            if (same) { if (defaultLine) defaultLine.addTo(map); return; }
+
+            // leaving any active metric coloring
+            colorKey = null;
+            document.querySelectorAll(".legend-row.numeric").forEach(r => r.classList.remove("active"));
+            document.getElementById("colorbar").style.display = "none";
+            segmentGroup.clearLayers();
+            if (defaultLine) defaultLine.remove();
+
+            overlay = { kind, origin };
+            const row = document.querySelector(`.legend-row[data-kind="${kind}"][data-origin="${origin}"]`);
+            if (row) row.classList.add("active");
+
+            overlayLayer = kind === "messages" ? buildMessagesLayer(origin) : buildOutagesLayer(origin);
+            overlayLayer.addTo(map);
+            updateEventVisibility();   // hide safety-event markers while this overlay is shown
           }
 
           if (points.length) buildLegend();
@@ -1179,6 +1348,11 @@
                   `${counts[sev]}</span>`;
               }).join("");
 
+            // Group the markers so they can be hidden together while an overlay
+            // (message points / coverage outages) owns the map.
+            eventLayer = L.layerGroup().addTo(map);
+            updateEventVisibility();
+
             for (const e of events) {
               const color = levels[e.severity].color;
               const time = e.start.slice(11, 19);
@@ -1189,7 +1363,7 @@
                 color: "#fff",
                 weight: 2,
                 fillOpacity: 0.95,
-              }).addTo(map).bindPopup(
+              }).addTo(eventLayer).bindPopup(
                 `<b style="color:${color}">${e.severity_name}</b> · ` +
                 `${e.type.replace(/_/g, " ")}<br>${e.summary}<br>` +
                 `<span style="color:#868e96">${time} UTC · ${e.duration_s} s</span>`

@@ -9,6 +9,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+import numpy as np
 import pandas as pd
 
 from analysis import SEVERITY_LEVELS, analyze_flight
@@ -379,6 +380,153 @@ def _atomic_write_json(path: Path, data) -> None:
     tmp.replace(path)  # atomic: never serve a half-written file
 
 
+def extract_adsb_message_points(flight_id: str) -> list:
+    """Position each ADS-B message along the GPS track by its place in the log.
+
+    ADS-B log lines carry no position or timestamp of their own, so every
+    ADS-B message is placed by linearly interpolating between the two GPS
+    fixes that bracket it in the raw stream (leading/trailing runs snap to the
+    nearest fix). Returns [{lat, lon, timestamp}, ...] in log order — one entry
+    per ADS-B message received.
+    """
+    file_path = PARSED_DIR / f"{flight_id}.json"
+    if not file_path.is_file():
+        return []
+
+    points = []
+    prev = None   # last GPS fix: {"lat", "lon", "t" (epoch s), "ts" (iso)}
+    pending = 0   # ADS-B messages seen since the last GPS fix
+
+    def _emit(next_fix):
+        nonlocal pending
+        if pending == 0:
+            return
+        if prev is not None and next_fix is not None:
+            for j in range(1, pending + 1):
+                f = j / (pending + 1)
+                t = prev["t"] + (next_fix["t"] - prev["t"]) * f
+                points.append({
+                    "lat": round(prev["lat"] + (next_fix["lat"] - prev["lat"]) * f, 6),
+                    "lon": round(prev["lon"] + (next_fix["lon"] - prev["lon"]) * f, 6),
+                    "timestamp": datetime.fromtimestamp(t, timezone.utc).isoformat(),
+                })
+        else:
+            anchor = prev or next_fix   # no bracket → snap to the one fix we have
+            if anchor is not None:
+                for _ in range(pending):
+                    points.append({"lat": round(anchor["lat"], 6),
+                                   "lon": round(anchor["lon"], 6),
+                                   "timestamp": anchor["ts"]})
+        pending = 0
+
+    with open(file_path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            record, _ = _parse_log_line(line)
+            if record is None:
+                continue
+
+            is_gps_fix = (
+                "Gps_lat" in record
+                and "Gps_lon" in record
+                and record.get("Gps_data") != "no_data"
+            )
+            if not is_gps_fix and "Adsb_HexId" in record:
+                pending += 1
+                continue
+
+            if is_gps_fix:
+                lat = _nmea_to_decimal(record.get("Gps_lat"), record.get("Gps_latsign"))
+                lon = _nmea_to_decimal(record.get("Gps_lon"), record.get("Gps_lonsign"))
+                ts = _parse_gps_timestamp(record.get("Gps_datum"), record.get("Gps_time"))
+                if lat is None or lon is None or pd.isna(ts):
+                    continue
+                fix = {"lat": lat, "lon": lon, "t": ts.timestamp(), "ts": ts.isoformat()}
+                _emit(fix)      # distribute ADS-B seen since prev between prev and this fix
+                prev = fix
+
+    _emit(None)                 # trailing ADS-B → snap to the last fix
+    return points
+
+
+# A gap counts as an outage when it exceeds both an absolute floor and a
+# multiple of the source's own median cadence (so a fast source needs a
+# proportionally longer silence to qualify). Tune here.
+OUTAGE_MIN_SECONDS = 8.0
+OUTAGE_GAP_FACTOR = 6.0
+_OUTAGE_MAX_PATH = 300  # cap points per drawn ADS-B outage segment
+
+
+def _iso_from_epoch(t) -> str:
+    return datetime.fromtimestamp(float(t), timezone.utc).isoformat()
+
+
+def compute_coverage_outages(df: pd.DataFrame, adsb_messages: list) -> dict:
+    """Find where each source went silent long enough to be a coverage hole.
+
+    Returns {"gps": [...], "adsb": [...]}, each item {start, end, duration_s,
+    path}. GPS outages have no fixes in the gap, so the path is the straight
+    jump from the last fix to the next; ADS-B outages are drawn along the GPS
+    path actually flown while ADS-B was silent, which is what shows *where*
+    coverage was missing.
+    """
+    result = {"gps": [], "adsb": []}
+    if df.empty:
+        return result
+    d2 = df.dropna(subset=["timestamp", "latitude", "longitude"]).sort_values("timestamp")
+    if len(d2) < 2:
+        return result
+    gt = d2["timestamp"].astype("int64").to_numpy() / 1e9
+    glat = d2["latitude"].to_numpy()
+    glon = d2["longitude"].to_numpy()
+
+    def _threshold(intervals):
+        if len(intervals) == 0:
+            return OUTAGE_MIN_SECONDS
+        return max(OUTAGE_MIN_SECONDS, OUTAGE_GAP_FACTOR * float(np.median(intervals)))
+
+    # ---- GPS: gap between consecutive fixes (no position known during it) ----
+    gd = np.diff(gt)
+    gthr = _threshold(gd)
+    for i in np.flatnonzero(gd > gthr):
+        result["gps"].append({
+            "start": _iso_from_epoch(gt[i]),
+            "end": _iso_from_epoch(gt[i + 1]),
+            "duration_s": round(float(gd[i]), 1),
+            "path": [
+                [round(float(glat[i]), 6), round(float(glon[i]), 6)],
+                [round(float(glat[i + 1]), 6), round(float(glon[i + 1]), 6)],
+            ],
+        })
+
+    # ---- ADS-B: gap between messages, drawn along the GPS path flown ----
+    if len(adsb_messages) >= 2:
+        at = np.array([datetime.fromisoformat(m["timestamp"]).timestamp()
+                       for m in adsb_messages])
+        ad = np.diff(at)
+        athr = _threshold(ad)
+        for i in np.flatnonzero(ad > athr):
+            t0, t1 = at[i], at[i + 1]
+            mask = (gt >= t0) & (gt <= t1)
+            path = [[round(float(la), 6), round(float(lo), 6)]
+                    for la, lo in zip(glat[mask], glon[mask])]
+            if len(path) > _OUTAGE_MAX_PATH:
+                step = len(path) // _OUTAGE_MAX_PATH + 1
+                path = path[::step] + [path[-1]]
+            if len(path) < 2:  # no GPS fixes in the gap — fall back to endpoints
+                path = [[adsb_messages[i]["lat"], adsb_messages[i]["lon"]],
+                        [adsb_messages[i + 1]["lat"], adsb_messages[i + 1]["lon"]]]
+            result["adsb"].append({
+                "start": _iso_from_epoch(t0),
+                "end": _iso_from_epoch(t1),
+                "duration_s": round(float(ad[i]), 1),
+                "path": path,
+            })
+    return result
+
+
 def process_flight(flight_id: str) -> dict:
     """Run the full pipeline for one flight and cache the result to disk.
 
@@ -391,12 +539,16 @@ def process_flight(flight_id: str) -> dict:
     payload = build_trajectory_payload(df)
     events = [] if df.empty else analyze_flight(df.sort_values("timestamp"))["events"]
 
+    adsb_messages = extract_adsb_message_points(flight_id)
+
     raw_path = PARSED_DIR / f"{flight_id}.json"
     cache = {
         "flight_id": flight_id,
         "trajectory": payload["trajectory"],
         "fields": payload["fields"],
         "events": events,
+        "adsb_messages": adsb_messages,
+        "outages": compute_coverage_outages(df, adsb_messages),
         "processed_at": datetime.now(timezone.utc).isoformat(),
         "source_mtime": raw_path.stat().st_mtime if raw_path.is_file() else None,
     }
@@ -595,6 +747,8 @@ async def flight_trajectory(flight_id: str):
     return {
         "trajectory": cache["trajectory"],
         "fields": cache["fields"],
+        "adsb_messages": cache.get("adsb_messages", []),
+        "outages": cache.get("outages", {"gps": [], "adsb": []}),
         "stale": _is_stale(flight_id, cache),
         **static,
     }
