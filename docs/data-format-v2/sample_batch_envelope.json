@@ -1,0 +1,14 @@
+{
+  "schema": "pilotsense.batch/1",
+  "device_id": "ps-esp32-0007",
+  "session_id": "2026-07-13T16-35-00Z_OMCAT",
+  "seq_start": 1,
+  "seq_end": 10,
+  "count": 10,
+  "sent_at": "2026-07-13T16:40:00.120Z",
+  "encoding": "ndjson+gzip+base64",
+  "encryption": "none",
+  "payload": "H4sIAAAAAAAA/6pWy...base64(gzip(NDJSON lines seq 1..10))...=",
+  "sig": "hmac-sha256=9f1c0e7b3a...",
+  "_comment_debug_variant": "During development a device MAY send encoding=ndjson with the raw NDJSON directly in `payload` (no gzip/base64) and no `sig`, so the batch is human-readable and greppable end to end."
+}

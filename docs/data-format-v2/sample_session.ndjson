@@ -1,0 +1,12 @@
+{"v":1,"t":"meta","seq":0,"ts":"2026-07-13T16:38:39.500Z","d":{"session_id":"2026-07-13T16-35-00Z_OMCAT","device_id":"ps-esp32-0007","fw":"pilotsense-fw 2.3.1","hw":"esp32-s3 rev2","aircraft":{"reg":"OM-CAT","icao24":"505861","callsign":"OMCAT"},"clock":{"source":"gps","state":"synced","precision":"ms"},"units":{"lat":"deg","lon":"deg","alt":"m","speed":"kt","angle":"deg"}}}
+{"v":1,"t":"gps","seq":1,"ts":"2026-07-13T16:38:40.000Z","d":{"fix":"3d","lat":48.167043,"lon":17.195257,"alt_m":128,"speed_kt":0,"track_deg":0.0,"sats":9,"hdop":0.9}}
+{"v":1,"t":"mods","seq":2,"ts":"2026-07-13T16:38:40.213Z","d":{"icao24":"505861","df":21,"bds":"2,0","status":"airborne","callsign":"OMCAT"}}
+{"v":1,"t":"mods","seq":3,"ts":"2026-07-13T16:38:40.641Z","d":{"icao24":"505861","df":5,"status":"airborne","squawk":1000}}
+{"v":1,"t":"adsb","seq":4,"ts":"2026-07-13T16:38:40.902Z","d":{"icao24":"505861","df":17,"tc":11,"lat":48.16706,"lon":17.19531,"alt_ft":325,"nic":8}}
+{"v":1,"t":"gps","seq":5,"ts":"2026-07-13T16:38:41.000Z","d":{"fix":"3d","lat":48.167013,"lon":17.195177,"alt_m":132,"speed_kt":0,"track_deg":0.0,"sats":9,"hdop":0.9}}
+{"v":1,"t":"mods","seq":6,"ts":"2026-07-13T16:38:41.188Z","d":{"icao24":"505861","df":20,"bds":"6,0","ias_kt":91,"hdg_deg":88.5,"baro_rate_fpm":640}}
+{"v":1,"t":"imu","seq":7,"ts":"2026-07-13T16:38:41.500Z","d":{"acc":{"x":0.12,"y":-0.03,"z":9.79},"att":{"pitch":2.4,"roll":-1.1,"yaw":88.7}}}
+{"v":1,"t":"baro","seq":8,"ts":"2026-07-13T16:38:41.503Z","d":{"pressure_hpa":1004.2,"alt_m":131.6,"temp_c":24.8}}
+{"v":1,"t":"gps","seq":9,"ts":"2026-07-13T16:38:42.000Z","d":{"fix":"3d","lat":48.167023,"lon":17.195178,"alt_m":132,"speed_kt":3,"track_deg":88.2,"sats":9,"hdop":0.9}}
+{"v":1,"t":"mods","seq":10,"ts":"2026-07-13T16:38:42.050Z","d":{"icao24":"505861","df":20,"bds":"5,0","gs_kt":78,"tas_kt":84,"track_deg":88.4,"roll_deg":-1.2}}
+{"v":1,"t":"gps","seq":11,"ts":"2026-07-13T16:38:43.000Z","d":{"fix":"3d","lat":48.167041,"lon":17.195301,"alt_m":135,"speed_kt":12,"track_deg":89.2,"sats":10,"hdop":0.8}}
