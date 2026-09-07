@@ -283,6 +283,21 @@
         addGroupedGraph(groups.adsb_position, "Position (Latitude / Longitude)");
         addGroupedGraph(groups.adsb_movement, "Movement (Ground Speed / Track / Heading)");
 
+        // Garmin G1000 groups — skipped automatically when the flight has none
+        // of their fields (see addGroupedGraph).
+        addGroupedGraph(groups.g_altitude, "Altitude (MSL / Indicated / GPS)");
+        addGroupedGraph(groups.g_speed, "Speed (Indicated / True / Ground)");
+        addGroupedGraph(groups.g_vspeed, "Vertical Speed (Baro / GPS)");
+        addGroupedGraph(groups.g_accel, "Accelerations (Lateral / Normal)");
+        addGroupedGraph(groups.g_ap, "Attitude vs. Autopilot Command");
+        addGroupedGraph(groups.g_rpm, "Engine RPM (1 / 2)");
+        addGroupedGraph(groups.g_power, "Engine Power (1 / 2)");
+        addGroupedGraph(groups.g_oil_temp, "Oil Temperature (1 / 2)");
+        addGroupedGraph(groups.g_pressure, "Oil & Fuel Pressure (1 / 2)");
+        addGroupedGraph(groups.g_fuel_flow, "Fuel Flow (1 / 2)");
+        addGroupedGraph(groups.g_fuel, "Fuel on Board (Left / Right / Total)");
+        addGroupedGraph(groups.g_volts, "Bus Voltage (1 / 2)");
+
         (data.fields || []).forEach(addSingleGraph);
 
         if (!charts.children.length) {

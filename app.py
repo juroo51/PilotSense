@@ -102,10 +102,85 @@ def _parse_log_line(line: str):
     return record, line
 
 
+# Flights can come from two kinds of log. The PilotSense device writes the
+# heterogeneous GPS/IMU/ADS-B NDJSON this app grew up on; a Garmin G1000 data
+# card is converted by tools/parse_garmin.py into the same NDJSON container,
+# with a leading {"_meta": {...}} record marking the source. Everything
+# downstream (pre-processing, safety analysis, map, graphs) is shared.
+GARMIN_SOURCE = "garmin_g1000"
+DEVICE_SOURCE = "pilotsense_device"
+
+
+def read_flight_meta(flight_id: str) -> dict:
+    """The `_meta` record a converted log starts with, or {} for device logs.
+
+    Reads only the first line, so it is cheap enough for the index to call on
+    every flight.
+    """
+    file_path = PARSED_DIR / f"{flight_id}.json"
+    if not file_path.is_file():
+        return {}
+    try:
+        with open(file_path, "r") as f:
+            first = f.readline().strip()
+    except OSError:
+        return {}
+    if not first:
+        return {}
+    record, _ = _parse_log_line(first)
+    if not record:
+        return {}
+    meta = record.get("_meta")
+    return meta if isinstance(meta, dict) else {}
+
+
+def flight_source(flight_id: str) -> str:
+    """Which kind of log a flight came from — drives labels and index styling."""
+    return read_flight_meta(flight_id).get("source") or DEVICE_SOURCE
+
+
+def _load_garmin_flight(file_path: Path) -> pd.DataFrame:
+    """Read a converted Garmin log (see tools/parse_garmin.py) into a DataFrame.
+
+    Samples are already normalized at conversion time, so this is a straight
+    read: rename t/lat/lon to the canonical timestamp/latitude/longitude the
+    rest of the app expects and leave every other field as written.
+    """
+    rows = []
+    with open(file_path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            record, _ = _parse_log_line(line)
+            if record is None or "_meta" in record:
+                continue
+            row = dict(record)
+            row["timestamp"] = row.pop("t", None)
+            if "lat" in row and "lon" in row:
+                row["latitude"] = row.pop("lat")
+                row["longitude"] = row.pop("lon")
+            else:
+                # No fix on this sample — the detectors and trajectory both
+                # need a position, so there is nothing to place it on.
+                row.pop("lat", None)
+                row.pop("lon", None)
+                continue
+            rows.append(row)
+
+    df = pd.DataFrame(rows)
+    if "timestamp" in df.columns:
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce", utc=True)
+    return df
+
+
 def load_flight_data(flight_id: str) -> pd.DataFrame:
     file_path = PARSED_DIR / f"{flight_id}.json"
     if not file_path.is_file():
         return pd.DataFrame()
+
+    if read_flight_meta(flight_id).get("source") == GARMIN_SOURCE:
+        return _load_garmin_flight(file_path)
 
     rows = []
     last_adsb = {}
@@ -227,6 +302,72 @@ FRIENDLY_NAMES = {
     "callsign": "Callsign",
 }
 
+# Garmin G1000 channels. These sit alongside FRIENDLY_NAMES rather than in it
+# because a few names are shared with the device format but mean something
+# slightly different there (e.g. `altitude` is ADS-B baro altitude on a device
+# log, baro-corrected MSL on a Garmin one). The overlay is applied at serve
+# time for Garmin flights only — see _labels_for().
+GARMIN_LABELS = {
+    "altitude": "Altitude MSL (ft)",
+    "alt_baro": "Indicated Altitude (ft)",
+    "alt_gps": "GPS Altitude (ft WGS84)",
+    "baro_setting": "Altimeter Setting (inHg)",
+    "oat": "Outside Air Temp (°C)",
+    "rate_climb": "Vertical Speed (ft/min)",
+    "vspeed_gps": "Vertical Speed, GPS (ft/min)",
+    "lat_accel": "Lateral Acceleration (G)",
+    "norm_accel": "Normal Acceleration (G from 1 G)",
+    "mag_var": "Magnetic Variation (°)",
+    "volt1": "Bus 1 Voltage (V)",
+    "volt2": "Bus 2 Voltage (V)",
+    "fuel_qty_left": "Fuel Quantity, Left (gal)",
+    "fuel_qty_right": "Fuel Quantity, Right (gal)",
+    "fuel_qty_total": "Fuel on Board (gal)",
+    "e1_fuel_flow": "Eng 1 Fuel Flow (gph)",
+    "e1_fuel_press": "Eng 1 Fuel Pressure (psi)",
+    "e1_oil_temp": "Eng 1 Oil Temperature (°F)",
+    "e1_oil_press": "Eng 1 Oil Pressure (psi)",
+    "e1_rpm": "Eng 1 RPM",
+    "e1_power_pct": "Eng 1 Power (%)",
+    "e2_fuel_flow": "Eng 2 Fuel Flow (gph)",
+    "e2_fuel_press": "Eng 2 Fuel Pressure (psi)",
+    "e2_oil_temp": "Eng 2 Oil Temperature (°F)",
+    "e2_oil_press": "Eng 2 Oil Pressure (psi)",
+    "e2_rpm": "Eng 2 RPM",
+    "e2_power_pct": "Eng 2 Power (%)",
+    "active_waypoint": "Active Waypoint",
+    "wpt_distance": "Distance to Waypoint (nm)",
+    "wpt_bearing": "Bearing to Waypoint (°)",
+    "hsi_source": "HSI Source",
+    "selected_course": "Selected Course (°)",
+    "hcdi": "Lateral Deviation (HCDI)",
+    "vcdi": "Vertical Deviation (VCDI)",
+    "nav1": "NAV1 Frequency (MHz)",
+    "nav2": "NAV2 Frequency (MHz)",
+    "com1": "COM1 Frequency (MHz)",
+    "com2": "COM2 Frequency (MHz)",
+    "wind_speed": "Wind Speed (kt)",
+    "wind_dir": "Wind Direction (°)",
+    "afcs_on": "Autopilot Engaged",
+    "roll_mode": "Autopilot Roll Mode",
+    "pitch_mode": "Autopilot Pitch Mode",
+    "roll_command": "Autopilot Roll Command (°)",
+    "pitch_command": "Autopilot Pitch Command (°)",
+    "gps_fix": "GPS Fix Type",
+    "gnss_hal": "Horizontal Alert Limit (m)",
+    "gnss_hpl_was": "Horizontal Protection Level, WAAS (m)",
+    "gnss_vpl_was": "Vertical Protection Level, WAAS (m)",
+    "gnss_hpl_fd": "Horizontal Protection Level, Fault Detection (m)",
+}
+
+
+def _labels_for(flight_id: str) -> dict:
+    """Friendly labels for one flight, with the Garmin overlay where it applies."""
+    if flight_source(flight_id) == GARMIN_SOURCE:
+        return {**FRIENDLY_NAMES, **GARMIN_LABELS}
+    return FRIENDLY_NAMES
+
+
 # ------------------ GROUPED GRAPHS ------------------
 
 GROUP_ACCEL = ["accX", "accY", "accZ"]
@@ -235,6 +376,24 @@ GROUP_ATTITUDE = ["pitch", "roll", "yaw"]
 # ADS-B XYZ-style groups (if present)
 GROUP_ADSB_POSITION = ["latitude", "longitude"]
 GROUP_ADSB_MOVEMENT = ["ground_speed", "track", "heading"]
+
+# Garmin G1000 groups. Channels that belong on one chart because they are the
+# same quantity from different sources (three altitudes, three speeds) or a
+# left/right pair that only means something compared side by side (the two
+# engines). Groups whose fields are absent are skipped by the graphs page, so
+# these are harmless on device flights.
+GROUP_G_ALTITUDE = ["altitude", "alt_baro", "alt_gps"]
+GROUP_G_SPEED = ["air_speed", "true_air_speed", "ground_speed"]
+GROUP_G_VSPEED = ["rate_climb", "vspeed_gps"]
+GROUP_G_ACCEL = ["lat_accel", "norm_accel"]
+GROUP_G_RPM = ["e1_rpm", "e2_rpm"]
+GROUP_G_OIL_TEMP = ["e1_oil_temp", "e2_oil_temp"]
+GROUP_G_PRESSURE = ["e1_oil_press", "e2_oil_press", "e1_fuel_press", "e2_fuel_press"]
+GROUP_G_POWER = ["e1_power_pct", "e2_power_pct"]
+GROUP_G_FUEL = ["fuel_qty_left", "fuel_qty_right", "fuel_qty_total"]
+GROUP_G_FUEL_FLOW = ["e1_fuel_flow", "e2_fuel_flow"]
+GROUP_G_VOLTS = ["volt1", "volt2"]
+GROUP_G_AP = ["roll", "roll_command", "pitch", "pitch_command"]
 
 # Raw IMU channels never sent to the UI.
 HIDDEN_FIELDS = {"gyroX", "gyroY", "gyroZ", "magX", "magY", "magZ"}
@@ -247,6 +406,18 @@ def _trajectory_groups() -> dict:
         "att": GROUP_ATTITUDE,
         "adsb_position": GROUP_ADSB_POSITION,
         "adsb_movement": GROUP_ADSB_MOVEMENT,
+        "g_altitude": GROUP_G_ALTITUDE,
+        "g_speed": GROUP_G_SPEED,
+        "g_vspeed": GROUP_G_VSPEED,
+        "g_accel": GROUP_G_ACCEL,
+        "g_rpm": GROUP_G_RPM,
+        "g_oil_temp": GROUP_G_OIL_TEMP,
+        "g_pressure": GROUP_G_PRESSURE,
+        "g_power": GROUP_G_POWER,
+        "g_fuel": GROUP_G_FUEL,
+        "g_fuel_flow": GROUP_G_FUEL_FLOW,
+        "g_volts": GROUP_G_VOLTS,
+        "g_ap": GROUP_G_AP,
     }
 
 
@@ -320,7 +491,7 @@ def _fmt_duration(seconds) -> str | None:
 
 
 def _summarize(flight_id: str, df: pd.DataFrame, trajectory: list, events: list,
-               raw_path: Path) -> dict:
+               raw_path: Path, meta: dict | None = None) -> dict:
     """Compact, display-ready flight card data — written as a tiny sidecar so
     the index never has to parse the (potentially large) full cache."""
     by_severity = {"notice": 0, "caution": 0, "danger": 0}
@@ -355,8 +526,13 @@ def _summarize(flight_id: str, df: pd.DataFrame, trajectory: list, events: list,
                 return str(s.mode().iloc[0])
         return None
 
+    meta = meta or {}
     points = len(trajectory)
     return {
+        "source": meta.get("source") or DEVICE_SOURCE,
+        "airframe": meta.get("airframe"),
+        "origin_ident": meta.get("origin_ident"),
+        "source_file": meta.get("source_file"),
         "points": points,
         "points_str": f"{points:,}",
         "date": date_str,
@@ -534,6 +710,7 @@ def process_flight(flight_id: str) -> dict:
     events, source mtime for staleness) plus a small <id>.summary.json the
     index reads. Called on ingest and by the manual /process endpoint only.
     """
+    meta = read_flight_meta(flight_id)
     df = load_flight_data(flight_id)
 
     payload = build_trajectory_payload(df)
@@ -544,6 +721,8 @@ def process_flight(flight_id: str) -> dict:
     raw_path = PARSED_DIR / f"{flight_id}.json"
     cache = {
         "flight_id": flight_id,
+        "source": meta.get("source") or DEVICE_SOURCE,
+        "meta": meta,
         "trajectory": payload["trajectory"],
         "fields": payload["fields"],
         "events": events,
@@ -552,7 +731,7 @@ def process_flight(flight_id: str) -> dict:
         "processed_at": datetime.now(timezone.utc).isoformat(),
         "source_mtime": raw_path.stat().st_mtime if raw_path.is_file() else None,
     }
-    summary = _summarize(flight_id, df, payload["trajectory"], events, raw_path)
+    summary = _summarize(flight_id, df, payload["trajectory"], events, raw_path, meta)
 
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     _atomic_write_json(PROCESSED_DIR / f"{flight_id}.json", cache)
@@ -617,6 +796,8 @@ def flight_status() -> list:
             "processed": processed,
             "stale": stale,
             "summary": summary,
+            # Read from the raw file, so unprocessed cards are styled correctly too.
+            "source": flight_source(fid),
         })
     return out
 
@@ -732,7 +913,7 @@ async def flight_trajectory(flight_id: str):
     """Serve the pre-processed trajectory. Does not compute anything: if the
     flight hasn't been processed yet, returns 409 so the UI can offer to
     process it (see POST /api/flights/{id}/process)."""
-    static = {"labels": FRIENDLY_NAMES, "groups": _trajectory_groups()}
+    static = {"labels": _labels_for(flight_id), "groups": _trajectory_groups()}
 
     cache = load_processed(flight_id)
     if cache is None:
@@ -749,6 +930,7 @@ async def flight_trajectory(flight_id: str):
         "fields": cache["fields"],
         "adsb_messages": cache.get("adsb_messages", []),
         "outages": cache.get("outages", {"gps": [], "adsb": []}),
+        "source": cache.get("source", DEVICE_SOURCE),
         "stale": _is_stale(flight_id, cache),
         **static,
     }

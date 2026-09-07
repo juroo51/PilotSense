@@ -895,6 +895,7 @@
           const adsbMessages = data.adsb_messages || [];
           const outages = data.outages || { gps: [], adsb: [] };
           const labels = data.labels || {};
+          const source = data.source || "pilotsense_device";
           const points = trajectory.map(p => [p.lat, p.lon]);
 
           const map = L.map("map").setView(points.length ? points[0] : [48.15, 17.12], 8);
@@ -1514,6 +1515,15 @@
           }
 
           (function renderDataQuality() {
+            // These checks verify the device's own ADS-B receiver — coverage,
+            // frozen runs, plausible range. A Garmin G1000 log has no ADS-B
+            // stream at all (its speeds come from the air-data computer and
+            // GPS), so the card would only ever grade the wrong thing.
+            if (source === "garmin_g1000") {
+              document.getElementById("dq-panel").style.display = "none";
+              return;
+            }
+
             const body = document.getElementById("dq-body");
             const keys = ["air_speed", "ground_speed"].filter(k =>
               trajectory.some(p => k in p));

@@ -21,6 +21,11 @@ uvicorn app:app --reload
 # Split a raw multi-flight NDJSON dump into per-flight files
 python tools/parse.py   # reads data/flights.json, writes data/parsed/<FLIGHT_ID>.json
 
+# Import a Garmin G1000 data card (one CSV per power-on cycle in data_log/)
+python tools/parse_garmin.py /path/to/data_log         # converts + processes
+python tools/parse_garmin.py /path/to/data_log --dry-run
+python tools/parse_garmin.py /path/to/data_log --min-points 600   # flights only
+
 # Generate a synthetic flight that triggers safety events at every severity
 python tools/make_demo_flight.py   # writes data/parsed/DEMO-EVENTS.json
 
@@ -41,7 +46,14 @@ Server-side code is [app.py](app.py) (routes, data loading) and [analysis.py](an
 
 **Pre-processing vs. viewing (important):** the expensive work happens at *load/trigger time*, not view time. `process_flight()` runs (a) automatically when a device ingests new data and (b) on demand via `POST /api/flights/{id}/process` (the index "Process/Reprocess" buttons and the map/graphs "Reprocess" button). The view endpoints (`/trajectory`, `/events`) **only read the cache and never recompute** — if a flight has no cache they return `409` with `needs_processing: true`, and the UI offers a Process button instead of rendering. Static config (friendly labels, groups, severity levels) is injected at serve time, so tweaking it doesn't require reprocessing; a cache is flagged `stale` when the raw file's mtime is newer than the cache. `tools/process.py` bootstraps/rebuilds caches from the CLI. (`GET /flight/{id}/fr24` still loads the raw file directly, since it's a manual, on-click action that needs the source DataFrame.)
 
-**Data format:** each per-flight file is NDJSON, one JSON object per line. Lines are heterogeneous — a line may carry GPS fields (`Gps_lat`, `Gps_lon`, `Gps_datum`, `Gps_time`, ...), ADS-B fields (`Adsb_HexId`, `Adsb_alt`, `Adsb_callsign`, ...), and/or IMU fields (`accX`, `pitch`, ...). `load_flight_data()` in app.py merges these into one timeline: it accumulates the latest ADS-B state across lines and emits a DataFrame row only when a line contains a GPS fix, attaching the last-known ADS-B values to it.
+**Two data sources.** A flight's `data/parsed/<id>.json` is NDJSON either way, but it comes from one of two kinds of log, and `load_flight_data()` dispatches between them:
+
+- **PilotSense device** (`pilotsense_device`) — the original heterogeneous GPS/IMU/ADS-B format described below. No `_meta` line.
+- **Garmin G1000 / NXi** (`garmin_g1000`) — an avionics data card, converted by `tools/parse_garmin.py`. The file starts with a `{"_meta": {...}}` record (source, airframe, system id, origin ident, source filename, units) and every following line is one already-normalized 1 Hz sample: `{"t", "lat", "lon", ...fields}`.
+
+`read_flight_meta()` / `flight_source()` read that first line (cheap — one `readline`) and are what the index, the label overlay and the cache all key off. Garmin channels reuse the canonical field names where the meaning matches (`altitude`, `ground_speed`, `air_speed`, `true_air_speed`, `track`, `heading`, `pitch`, `roll`, `rate_climb`), so the safety detectors, the index summary and the map's metric colouring work on both sources unchanged; `GARMIN_LABELS` overrides `FRIENDLY_NAMES` at serve time for the handful whose meaning differs (Garmin `altitude` is baro-corrected MSL, not ADS-B baro altitude). Garmin logs have no ADS-B stream, so `adsb_messages` is empty, the map's **ADS-B data-quality** card is hidden for them, and `GET /fr24` returns 404. Radio frequencies are stored as strings so 8.33 kHz spacing survives the payload's 2-decimal rounding. On the index, Garmin cards are violet with a `G1000` badge and a dial icon; device cards stay blue with an `ADS-B` badge — the accent is one set of CSS custom properties per `.card[data-source]`.
+
+**Data format:** each PilotSense-device per-flight file is NDJSON, one JSON object per line. Lines are heterogeneous — a line may carry GPS fields (`Gps_lat`, `Gps_lon`, `Gps_datum`, `Gps_time`, ...), ADS-B fields (`Adsb_HexId`, `Adsb_alt`, `Adsb_callsign`, ...), and/or IMU fields (`accX`, `pitch`, ...). `load_flight_data()` in app.py merges these into one timeline: it accumulates the latest ADS-B state across lines and emits a DataFrame row only when a line contains a GPS fix, attaching the last-known ADS-B values to it.
 
 **Data quirks handled in `load_flight_data()`:**
 - Some log lines contain `"Adsb_HexId": 505CE5` (unquoted hex), which is invalid JSON — a regex repair quotes it before retrying the parse.

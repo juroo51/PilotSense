@@ -47,6 +47,20 @@ def _runs(mask, seconds=None, merge_gap_s=0):
     yield from runs
 
 
+def _speed(df):
+    """Ground speed in knots, from whichever channel this log carries.
+
+    Device logs have a GPS speed (and an ADS-B ground speed alongside it);
+    converted Garmin logs have a single ground-speed channel. Returns an
+    all-NaN series when neither is present, so callers can bail out on the
+    usual notna() check instead of tripping over a missing column.
+    """
+    for name in ("gps_speed", "ground_speed"):
+        if name in df.columns:
+            return pd.to_numeric(df[name], errors="coerce")
+    return pd.Series(np.nan, index=df.index, dtype="float64")
+
+
 def _severity_for(value, thresholds):
     """thresholds = (notice, caution, danger), ascending magnitudes."""
     level = 0
@@ -139,7 +153,7 @@ def detect_sharp_turns(df, seconds):
     if "track" not in df.columns:
         return []
     track = pd.to_numeric(df["track"], errors="coerce")
-    speed = pd.to_numeric(df.get("gps_speed"), errors="coerce")
+    speed = _speed(df)
 
     dtrack = track.diff()
     dtrack = (dtrack + 180) % 360 - 180  # wrap to [-180, 180]
@@ -172,8 +186,8 @@ def detect_speed_anomaly(df, seconds):
     Notice > 1.5 kt/s, Caution > 3 kt/s, Danger > 6 kt/s, sustained ≥ 4 s,
     starting above 40 kt.
     """
-    speed = pd.to_numeric(df.get("gps_speed"), errors="coerce")
-    if speed is None or speed.notna().sum() < 20:
+    speed = _speed(df)
+    if speed.notna().sum() < 20:
         return []
 
     dt = pd.Series(np.concatenate(([np.nan], np.diff(seconds))))
@@ -211,9 +225,10 @@ def detect_low_stall_margin(df, seconds):
     develop into a spin. Note: GPS ground speed approximates airspeed,
     so wind shifts the margin.
     """
-    speed = pd.to_numeric(df.get("gps_speed"), errors="coerce")
-    track = pd.to_numeric(df.get("track"), errors="coerce")
-    if speed is None or speed.notna().sum() < 20:
+    speed = _speed(df)
+    track = pd.to_numeric(df["track"], errors="coerce") if "track" in df.columns \
+        else pd.Series(np.nan, index=df.index, dtype="float64")
+    if speed.notna().sum() < 20:
         return []
 
     if "aircraft_status" in df.columns:
