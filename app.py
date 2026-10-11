@@ -799,6 +799,20 @@ def flight_status() -> list:
             # Read from the raw file, so unprocessed cards are styled correctly too.
             "source": flight_source(fid),
         })
+
+    # Newest flight first. Ids aren't date-sortable (device and Garmin flights
+    # are named differently), so order by the summary's start time; flights
+    # with no summary yet (unprocessed) sink to the bottom.
+    def _started(item):
+        s = item["summary"] or {}
+        try:
+            return datetime.strptime(
+                f"{s.get('date')} {s.get('time_start') or '00:00'}", "%d %b %Y %H:%M"
+            )
+        except ValueError:
+            return datetime.min
+
+    out.sort(key=_started, reverse=True)
     return out
 
 
